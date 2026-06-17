@@ -18,6 +18,8 @@ import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
 import QuizBlock from '../../components/topic/QuizBlock.tsx';
 import DiagramWrapper from '../../components/topic/DiagramWrapper.astro';
 import NLPPipeline from '../../components/diagrams/NLPPipeline.tsx';
+import AmbiguityDemo from '../../components/diagrams/AmbiguityDemo.tsx';
+import PipelinePlayground from '../../components/diagrams/PipelinePlayground.tsx';
 
 export const topic = getTopicBySlug('intro-to-nlp');
 
@@ -28,6 +30,10 @@ Natural Language Processing (NLP) is the branch of artificial intelligence conce
 This first topic gives you the map for everything that follows. We will define what NLP actually is, build intuition for *why language is so much harder for machines than it looks*, and walk through the classic processing pipeline that turns a raw string of characters into structured information a model can reason about. By the end you will understand the vocabulary the rest of this curriculum assumes, and you will have run a real end-to-end pipeline in Python.
 
 Think of this topic as the trailhead. The trail leads from counting words, through embeddings and Transformers, all the way to autonomous agents — but every step builds on the ideas introduced here.
+
+<Callout type="tip" title="How to read this page">
+Most NLP intros *tell* you language is hard. This one lets you *feel* it. You will flip a single word and watch a sentence's meaning invert, then run your own sentences through a real pipeline that executes live in your browser. Read the prose for the *why*; play with the demos for the *aha*.
+</Callout>
 
 ## What is NLP?
 
@@ -56,6 +62,12 @@ If language is so natural for humans, why is it hard for computers? The short an
 
 **Referential ambiguity** — pronouns and descriptions point at things, and figuring out what they point at is hard. In "The trophy didn't fit in the suitcase because it was too big," what does "it" refer to? Swap "big" for "small" and the answer flips, even though the sentence structure is identical. This is the famous Winograd schema, and it shows how much world knowledge language understanding requires.
 
+Don't just read it — flip the word yourself and watch the meaning move:
+
+<DiagramWrapper title="The Winograd schema, live" caption="Same grammar, opposite meaning. A machine sees an identical string both times; only world knowledge resolves the pronoun.">
+  <AmbiguityDemo client:visible />
+</DiagramWrapper>
+
 On top of ambiguity, language is **productive and irregular**. Speakers invent new words ("doomscrolling"), bend grammar, use sarcasm and idioms ("it's raining cats and dogs" has nothing to do with animals), and rely on shared context ("see you there" — where?). Spelling varies, typos abound, and meaning shifts over time and across communities. A system that works perfectly on clean newswire text can fall apart on tweets.
 
 <Callout type="warning" title="Common misconception">
@@ -82,6 +94,16 @@ The eight canonical stages are:
 8. **Model** — a downstream component that uses those features to perform a task such as classification, named-entity recognition, or translation.
 
 Each stage can introduce errors that propagate downstream — a tokenizer that mishandles "U.S.A." will confuse everything after it. This *cascading error* problem is one reason the field moved toward end-to-end models that learn the whole mapping jointly.
+
+The diagram above uses a fixed example. The real lesson lands when it is *your* words. The playground below runs the first three stages — sentence splitting, tokenization, and normalization — live, on whatever you type. There is no model and no server: it is a few dozen lines of plain JavaScript, so every messy edge case is yours to provoke.
+
+<DiagramWrapper title="Run the pipeline on your own text" caption="Try the awkward cases on purpose: abbreviations ('Dr.'), decimals ('3.14'), contractions ('isn't'), and em-dashes. Each one is a decision a real tokenizer has to make.">
+  <PipelinePlayground client:visible />
+</DiagramWrapper>
+
+<Callout type="warning" title="Why the demo is deliberately imperfect">
+The playground special-cases a handful of abbreviations and contractions by hand. Notice what happens with a name it doesn't know, or an unusual punctuation pattern — it breaks. That fragility is the whole point: hand-written rules never cover the long tail of real language, which is exactly the wall that pushed NLP toward statistical and then neural methods.
+</Callout>
 
 ## Real-world NLP applications
 
