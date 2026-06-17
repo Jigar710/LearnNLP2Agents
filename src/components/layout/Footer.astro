@@ -6,6 +6,8 @@ import Logo from './Logo.astro';
 import { withBase } from '../../utils/base';
 
 const GITHUB_URL = 'https://github.com/Jigar710/LearnNLP2Agents';
+const ISSUES_URL = `${GITHUB_URL}/issues/new`;
+const LINKEDIN_URL = 'https://www.linkedin.com/in/jigarshekhat/';
 const year = new Date().getFullYear();
 ---
 
@@ -13,7 +15,7 @@ const year = new Date().getFullYear();
   <div class="site-footer-inner">
     <div class="footer-brand">
       <a href={withBase('/')} aria-label="NLP to Agents — home"><Logo /></a>
-      <p class="footer-tagline">NLP to Agentic AI — beginner to advanced, step by step, free forever.</p>
+      <p class="footer-tagline">NLP to Agentic AI — beginner to advanced, step by step.</p>
     </div>
 
     <nav class="footer-links" aria-label="Footer">
@@ -21,12 +23,16 @@ const year = new Date().getFullYear();
       <a href={withBase('/glossary')}>Glossary</a>
       <a href={withBase('/topic/intro-to-nlp')}>Start Learning</a>
       <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href={ISSUES_URL} target="_blank" rel="noopener noreferrer">Report an Issue / Request a Change</a>
     </nav>
   </div>
 
   <div class="footer-bottom">
-    <span>© {year} NLP to Agents · 48 Topics · 5 Phases · 100% Free</span>
-    <span>Built with Astro + ❤️</span>
+    <span>© {year} NLP to Agents · 48 Topics · 5 Phases</span>
+    <span class="footer-author">
+      Made by
+      <a href={LINKEDIN_URL} target="_blank" rel="noopener noreferrer">Jigar Shekhat</a>
+    </span>
   </div>
 </footer>
 
@@ -78,5 +84,12 @@ const year = new Date().getFullYear();
     font-size: 0.78rem;
     color: var(--text-muted);
     border-top: 1px solid var(--border-subtle);
+  }
+  .footer-author a {
+    color: var(--link-color);
+    font-weight: 600;
+  }
+  .footer-author a:hover {
+    text-decoration: underline;
   }
 </style>
