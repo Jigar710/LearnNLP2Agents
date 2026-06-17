@@ -1,0 +1,45 @@
+---
+/**
+ * MathBlock (PRD §11.2 / Step 6.3) — KaTeX equation wrapper.
+ * Renders the formula to HTML at build time (no client JS). Display mode is a
+ * centered block with an optional caption; inline mode flows with text.
+ */
+import katex from 'katex';
+
+interface Props {
+  formula: string;
+  display?: boolean;
+  caption?: string;
+}
+const { formula, display = true, caption } = Astro.props;
+
+const html = katex.renderToString(formula, {
+  displayMode: display,
+  throwOnError: false,
+  output: 'html',
+});
+---
+
+{
+  display ? (
+    <div class="math-block">
+      <div class="math-render" set:html={html} />
+      {caption ? <span class="math-caption">{caption}</span> : null}
+    </div>
+  ) : (
+    <span class="math-inline" set:html={html} />
+  )
+}
+
+<style>
+  .math-block {
+    margin: 1.5rem 0;
+  }
+  .math-render {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .math-inline {
+    display: inline;
+  }
+</style>

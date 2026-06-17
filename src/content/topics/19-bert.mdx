@@ -1,0 +1,178 @@
+---
+title: "BERT — Bidirectional Pre-training"
+subtitle: "Pre-training on masked language modeling to learn deep context"
+phase: 2
+topicNumber: 19
+slug: "bert"
+readingTime: 16
+prerequisites: ["transformer-encoder"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: true
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import DiagramWrapper from '../../components/topic/DiagramWrapper.astro';
+import BertMasking from '../../components/diagrams/BertMasking.tsx';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('bert');
+
+<TopicHero topic={topic} />
+
+In late 2018, BERT arrived and rewrote the rules of NLP. Almost overnight it shattered records across a dozen benchmarks, and it popularized a workflow that still dominates: **pre-train once on enormous unlabelled text, then fine-tune cheaply for each task.** BERT is an encoder-only Transformer trained to fill in deliberately hidden words, and that simple objective turns out to teach it a remarkable amount about syntax, semantics, and even world knowledge. This topic explains how BERT works, why bidirectionality matters, and how to put a pre-trained BERT to work.
+
+BERT — Bidirectional Encoder Representations from Transformers — is the natural payoff of the encoder you built in Topic 15. Here we add the two pre-training tasks (masked language modelling and next-sentence prediction), the fine-tuning recipe, and the family of variants it spawned. An interactive demo lets you mask words and watch BERT's predictions, and the code loads a real pre-trained model.
+
+## The transfer-learning revolution
+
+Before BERT, most NLP models were trained from scratch for each task on relatively small labelled datasets. This was wasteful — every model relearned the basics of language. Computer vision had already discovered a better way: pre-train a network on a huge dataset (ImageNet), then fine-tune it for specific tasks, transferring general visual knowledge. BERT brought this "ImageNet moment" to NLP. By pre-training on billions of words of unlabelled text, BERT learns general-purpose language representations once; fine-tuning then adapts them to any task with a small labelled dataset and a few epochs of training. This decoupling of expensive general learning from cheap task-specific tuning is BERT's enduring contribution.
+
+## Architecture: an encoder, nothing more
+
+BERT is simply a **Transformer encoder stack** — the exact architecture from Topic 15, with no decoder. Because it is an encoder, its self-attention is **bidirectional**: every token attends to every other token in both directions, so each word's representation reflects its entire left and right context at once. This is the crucial difference from GPT, which (as a decoder) only sees leftward context. For *understanding* tasks — is this sentence positive? is this word a person? does sentence B follow from sentence A? — seeing the whole context is exactly what you want.
+
+BERT came in two sizes. **BERT-base** has 12 encoder layers, a hidden size of 768, 12 attention heads, and about 110 million parameters. **BERT-large** has 24 layers, hidden size 1024, 16 heads, and about 340 million parameters. Both were considered very large in 2018.
+
+## Pre-training task 1: Masked Language Modelling
+
+Here is BERT's central trick. A standard left-to-right language model cannot be bidirectional, because letting a token see the future would let it trivially predict the next word. BERT sidesteps this with **Masked Language Modelling (MLM)**: randomly hide some input tokens and train the model to predict them from the surrounding context on *both* sides.
+
+Concretely, BERT masks about **15%** of tokens and asks the model to recover them. Because the model must predict a masked word using both its left and right neighbours, it is forced to build genuinely bidirectional representations. "The [MASK] sat on the mat" — to fill the blank, the model uses "sat", "mat", and the whole sentence, learning rich contextual understanding in the process.
+
+<DiagramWrapper title="Masked language modelling" caption="Click a [MASK] to see BERT's top predictions; hit Re-mask to hide different words.">
+  <BertMasking client:visible />
+</DiagramWrapper>
+
+## The 80/10/10 masking detail
+
+There is a subtlety. If masked tokens were always replaced with the literal `[MASK]` token, the model would only ever practice on `[MASK]` inputs — but at fine-tuning and inference time, there are no `[MASK]` tokens, creating a mismatch. BERT's fix: of the 15% chosen tokens, **80%** are replaced with `[MASK]`, **10%** are replaced with a *random* word, and **10%** are left *unchanged*. This forces the model to build a strong representation of every token (since it might be asked to predict an unmasked one) and reduces the gap between pre-training and fine-tuning.
+
+<Callout type="tip">
+The 80/10/10 split is a small but clever piece of engineering. By sometimes showing the real word or a wrong word instead of [MASK], BERT avoids becoming dependent on the [MASK] token, which never appears downstream.
+</Callout>
+
+## Pre-training task 2: Next Sentence Prediction
+
+BERT's second objective, **Next Sentence Prediction (NSP)**, trains it to tell whether sentence B genuinely follows sentence A in the original text, or is a random sentence. The idea was to teach inter-sentence relationships useful for tasks like question answering and natural-language inference. BERT prepends a `[CLS]` token whose final representation feeds the NSP classifier, and separates the two sentences with `[SEP]`. Later research (notably RoBERTa) found NSP to be of dubious value and dropped it with no loss — but `[CLS]` and `[SEP]` remain standard.
+
+## Fine-tuning BERT
+
+Using BERT is delightfully uniform. Take the pre-trained model, add a small task-specific head on top, and train the whole thing end-to-end on your labelled data for a few epochs. For **classification**, attach a classifier to the `[CLS]` token's output. For **token labelling** (NER), attach a classifier to every token's output. For **question answering**, predict start and end positions of the answer span. The same pre-trained weights serve all of these — only the small head and a few epochs of fine-tuning differ. This is why BERT spread so fast: one model, many tasks, little task-specific data.
+
+## Variants and what BERT learns
+
+BERT spawned a family. **RoBERTa** trained longer on more data, dropped NSP, and tuned hyperparameters, beating BERT with the same architecture. **DistilBERT** compressed BERT to 40% smaller and 60% faster via knowledge distillation with minimal accuracy loss. **ALBERT** shared parameters across layers to shrink the model. **DeBERTa** improved the attention with disentangled position and content representations. Probing studies revealed what these models learn: lower layers capture surface and syntactic features, middle layers capture syntax, and upper layers capture semantics and task-relevant abstractions — and BERT encodes a surprising amount of factual world knowledge in its weights.
+
+## Why does masked language modelling work so well?
+
+It is worth dwelling on *why* such a simple objective — fill in the blank — teaches so much. To predict a masked word accurately, a model must implicitly solve many subproblems. "The trophy didn't fit in the [MASK] because it was too big" requires reasoning about physical size and the likely referent. "She poured the [MASK] into the cup" narrows to liquids. "The scientist published her [MASK] in Nature" invokes world knowledge about research. Every masked prediction is a tiny comprehension test, and across billions of them the model is pressured to encode syntax (what part of speech fits), semantics (what meaning fits), and facts (what is true) — all without a single human label.
+
+This is the deep reason self-supervised pre-training is so powerful: the supervision signal comes free from the structure of language itself. The text is its own teacher. There is no annotation bottleneck, so the model can learn from essentially unlimited data. Masked language modelling is one instance of a broader principle that recurs throughout the next phase — design a prediction task whose answers are already present in raw data, and scale it up. BERT's MLM and GPT's next-token prediction are two faces of the same idea, and that idea, applied at ever-larger scale, is the engine behind every modern language model.
+
+## BERT's limitations
+
+For all its influence, BERT has real limitations that shaped what came next. Because it is trained to fill in blanks rather than to continue text, BERT cannot *generate* fluent language — it is an understanding model, not a writer. The `[MASK]` token creates a pre-train/fine-tune mismatch that the 80/10/10 trick only partly addresses. And masked language modelling is sample-*inefficient*: only the 15% of masked tokens contribute to the loss at each step, so 85% of the compute on each sequence produces no direct learning signal, which is part of why ELECTRA (Topic 23) later proposed a more efficient alternative.
+
+Most consequentially, BERT requires a separate fine-tuning step with labelled data for each task. It cannot follow instructions or perform a task it was merely *told* about in a prompt. The next paradigm — large autoregressive models — would erode exactly this limitation, learning to perform new tasks from a few examples or a description alone, with no gradient updates. That capability, in-context learning, is foreign to BERT and central to GPT, and it is a major reason the field's center of gravity shifted toward decoder-only models even though BERT-style encoders remain superb for classification and retrieval.
+
+## The encoder era and what came after
+
+It would be a mistake to read BERT as obsolete. Encoder models remain the best tool for a large class of problems where you need a *representation* rather than generated text: semantic search and retrieval (the embeddings that power RAG in Phase 4 are usually encoder-based), classification, reranking, and clustering. They are smaller, faster, and cheaper to run than generative models, and for a fixed task with labelled data they often match or beat much larger LLMs at a fraction of the cost. Sentence-Transformers, a hugely popular library for producing sentence embeddings, is built on BERT-style encoders.
+
+So the field did not abandon BERT; it bifurcated. Encoders specialized in understanding and representation; decoders specialized in generation and in-context learning. Many production systems use both — an encoder to retrieve relevant documents, a decoder to generate an answer grounded in them. Understanding BERT deeply therefore is not historical trivia; it is half of the modern toolkit. As you move into Phase 3 and the decoder-dominated world of large language models, keep BERT in mind as the encoder counterpart whose pre-train-then-adapt recipe started it all and whose descendants still quietly power search bars and recommendation systems everywhere.
+
+## BERT's input: three embeddings summed
+
+One concrete detail rounds out the picture: how BERT represents its input. Each token's input vector is the sum of *three* embeddings. The **token embedding** is the usual WordPiece-id lookup. The **position embedding** is BERT's learned positional encoding (a table, not sinusoids). And a **segment embedding** marks whether a token belongs to sentence A or sentence B, which is what lets BERT handle sentence-pair tasks and the Next Sentence Prediction objective. These three are added element-wise before the encoder stack, so each token carries its identity, its position, and its sentence membership at once.
+
+This is also where the special tokens live in practice: every input begins with `[CLS]`, sentence pairs are joined with `[SEP]`, and inputs are padded to a common length with `[PAD]` (ignored via an attention mask). When you tokenize for BERT with the HuggingFace library, all of this — WordPiece splitting, special-token insertion, segment ids, and the attention mask — is handled for you by the tokenizer, but knowing what it builds demystifies the model's inputs and explains why the `[CLS]` vector is the natural place to attach a sequence-level classifier.
+
+## Code Example
+
+The code loads a pre-trained BERT, runs masked-word prediction (the very task it was pre-trained on), and shows the standard pattern for fine-tuning it on a classification task.
+
+<CodeBlock lang="python" filename="bert_demo.py" code={`# bert_demo.py
+# pip install transformers torch
+from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+
+# 1) Masked language modelling — BERT's pre-training task, run directly
+fill = pipeline("fill-mask", model="bert-base-uncased")
+for r in fill("The capital of France is [MASK].")[:3]:
+    print(f"  {r['token_str']:<10} {r['score']:.3f}")
+
+# Expected (approx):
+#   paris      0.42
+#   lyon       0.06
+#   marseille  0.04
+
+# 2) The fine-tuning pattern for classification (SST-2 sentiment)
+tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+model = AutoModelForSequenceClassification.from_pretrained(
+    "bert-base-uncased", num_labels=2     # add a 2-class head on [CLS]
+)
+
+batch = tokenizer(["a masterpiece", "an utter bore"],
+                  padding=True, return_tensors="pt")
+import torch
+with torch.no_grad():
+    logits = model(**batch).logits        # (2, 2) — fine-tune to train this head
+
+print("\\nlogits shape:", tuple(logits.shape))
+print("params:", f"{sum(p.numel() for p in model.parameters()):,}")
+# In practice: feed labelled data + an optimizer, train a few epochs.
+
+# Expected:
+# logits shape: (2, 2)
+# params: 109,483,778
+`} />
+
+The fill-mask output shows BERT doing exactly what it was pre-trained for — predicting a hidden word from bidirectional context — and confidently choosing "paris", evidence of the world knowledge baked into its weights. The classification snippet shows the universal fine-tuning recipe: load the encoder, bolt on a small head over the `[CLS]` token, and train. That two-step pattern — pre-train once, fine-tune cheaply — is BERT's lasting gift to the field.
+
+<PaperLink
+  title="BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding"
+  authors="Devlin, Chang, Lee, Toutanova"
+  year={2018}
+  venue="NAACL"
+  url="https://arxiv.org/abs/1810.04805"
+/>
+
+<KeyTakeaways phase={2}>
+- BERT brought **pre-train-then-fine-tune transfer learning** to NLP: learn general language once on unlabelled text, adapt cheaply per task.
+- It is an **encoder-only** Transformer, so its self-attention is **bidirectional** — every token sees full left and right context, ideal for understanding tasks.
+- **Masked Language Modelling** hides ~15% of tokens and predicts them from both sides; the **80/10/10** split avoids over-relying on the `[MASK]` token.
+- **Next Sentence Prediction** was the second objective; later work (RoBERTa) showed it was unnecessary, but `[CLS]`/`[SEP]` persist.
+- **Fine-tuning** adds a small task head (often on `[CLS]`) and trains end-to-end — one model serves classification, NER, QA, and more.
+- Variants (**RoBERTa, DistilBERT, ALBERT, DeBERTa**) refine training, size, or attention; BERT's layers progress from syntax to semantics.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Why is BERT bidirectional but GPT is not?",
+    options: ["BERT is larger", "BERT is an encoder (unmasked self-attention sees both directions); GPT is a decoder with causal masking that only sees leftward context", "BERT uses a bigger vocabulary", "GPT has no attention"],
+    correctIndex: 1,
+    explanation: "BERT's encoder self-attention is unmasked, so every token attends to both left and right context. GPT's decoder uses a causal mask for next-token generation, restricting each token to leftward context only."
+  },
+  {
+    question: "In BERT's masking, what happens to the 15% of selected tokens?",
+    options: ["All replaced with [MASK]", "80% become [MASK], 10% a random word, 10% unchanged", "All deleted", "All replaced with [UNK]"],
+    correctIndex: 1,
+    explanation: "The 80/10/10 split (mask / random / unchanged) prevents the model from over-relying on the [MASK] token, which never appears during fine-tuning or inference, reducing the train/serve mismatch."
+  },
+  {
+    question: "What is the key advantage of BERT's pre-train-then-fine-tune approach?",
+    options: ["It needs no data at all", "General language knowledge is learned once on unlabelled text, then adapted to each task with little labelled data", "It removes the need for attention", "It only works for translation"],
+    correctIndex: 1,
+    explanation: "Pre-training on massive unlabelled text learns general representations; fine-tuning adapts them to a specific task with a small head and modest labelled data — far cheaper than training each task from scratch."
+  }
+]} />
+
+## What's Next
+
+BERT mastered understanding by reading bidirectionally. Its great counterpart took the opposite path — predicting the next token left to right — and that choice unlocked open-ended generation. In **GPT — Autoregressive Language Modeling**, we study the decoder-only paradigm that scaled into the large language models powering modern AI.

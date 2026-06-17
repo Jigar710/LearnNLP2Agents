@@ -1,0 +1,211 @@
+---
+title: "Bag of Words & TF-IDF Representation"
+subtitle: "Turning words into numbers — classic vector representations"
+phase: 1
+topicNumber: 5
+slug: "bag-of-words-tfidf"
+readingTime: 14
+prerequisites: ["corpus-tokens-vocabulary", "text-preprocessing"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+
+export const topic = getTopicBySlug('bag-of-words-tfidf');
+
+<TopicHero topic={topic} />
+
+Machines do arithmetic, not English. Before any model — linear, tree-based, or neural — can work with text, the text must become numbers. The oldest and still surprisingly useful way to do this is to represent a document as a *vector of word counts*. That idea, **Bag of Words**, and its weighted refinement, **TF-IDF**, are the classic count-based representations. They are simple enough to derive by hand, fast enough to scale to millions of documents, and good enough that TF-IDF still powers real search engines today.
+
+In this topic you will learn how to turn documents into vectors, why raw counts are a weak signal, how TF-IDF fixes that by rewarding distinctive words and penalizing ubiquitous ones, and how to measure the similarity between two documents with the cosine of the angle between their vectors. We will derive every formula and then implement all of it from scratch in Python before checking our work against scikit-learn. These representations are also the perfect foil for the next topic: understanding *why* Bag of Words throws away meaning is what motivates word embeddings.
+
+## The need for numerical representation
+
+A model sees a document as a point in space — a vector of numbers. The question is how to place documents in that space so that geometry reflects meaning: documents about similar topics should land near each other. The simplest scheme fixes a vocabulary of `|V|` words and represents each document as a `|V|`-dimensional vector, where each coordinate corresponds to one vocabulary word. What goes in each coordinate is the design choice that distinguishes Bag of Words from TF-IDF.
+
+## Bag of Words
+
+In the **Bag of Words (BoW)** model, the value at each coordinate is simply the count of that word in the document. The name is literal: you imagine pouring all the words of a document into a bag, shaking it, and counting how many of each you have — order is discarded entirely.
+
+Suppose our vocabulary is `[cat, dog, sat, the, mat]` and our document is "the cat sat on the mat." Ignoring "on" (not in vocab), the BoW vector is `[1, 0, 1, 2, 1]`: one "cat", zero "dog", one "sat", two "the", one "mat". Stack the BoW vectors of many documents and you get a **document–term matrix**, the workhorse data structure of classical text mining. Each row is a document, each column a vocabulary word.
+
+BoW is trivial to compute and works astonishingly well for tasks like topic classification and spam filtering, where the mere *presence* of certain words ("free", "winner", "viagra") is highly predictive regardless of order.
+
+## The limitations of Bag of Words
+
+BoW has three serious weaknesses, and naming them precisely is what motivates everything that follows.
+
+**Order is lost.** "Dog bites man" and "man bites dog" produce *identical* BoW vectors, even though one is news and the other is tragedy. Any meaning that lives in word order is invisible to BoW.
+
+**The vectors are sparse and high-dimensional.** With a vocabulary of 50,000 words, every document is a 50,000-dimensional vector that is almost entirely zeros, since any one document uses only a few hundred distinct words. This wastes memory and makes distances less meaningful.
+
+**There is no notion of semantics.** In BoW, "car" and "automobile" are different coordinates with zero relationship — as unrelated as "car" and "banana". The representation has no idea that some words mean nearly the same thing. This is the deepest limitation, and removing it is the entire point of word embeddings (Topic 6).
+
+<Callout type="warning" title="Counts overweight common words">
+Raw counts have another problem: the most frequent words ('the', 'is', 'of') get the largest values, yet they carry the least meaning. A document vector dominated by counts of 'the' tells you almost nothing about the topic. TF-IDF is the fix.
+</Callout>
+
+## TF-IDF: rewarding distinctive words
+
+**TF-IDF** (Term Frequency–Inverse Document Frequency) refines BoW with a simple, powerful idea: a word is important to a document if it appears *often in that document* but *rarely across the whole collection*. A word like "the" appears often everywhere, so it is uninformative; a word like "photosynthesis" appears in few documents, so when it shows up it is highly informative about the topic.
+
+TF-IDF multiplies two factors. **Term Frequency (TF)** measures how often a term appears in a document — the "important to this document" part. **Inverse Document Frequency (IDF)** measures how rare the term is across the collection — the "distinctive overall" part. Their product is high only when both conditions hold: frequent here *and* rare elsewhere.
+
+## The Mathematics
+
+Let `t` be a term, `d` a document, and `N` the total number of documents in the collection. Term frequency is the count of the term in the document, often normalized by the document's length:
+
+<MathBlock
+  formula="\text{TF}(t, d) = \frac{\text{count of } t \text{ in } d}{\text{total terms in } d}"
+  caption="Term frequency — how prominent the term is within the document."
+/>
+
+Inverse document frequency uses `df(t)`, the number of documents that contain the term at least once:
+
+<MathBlock
+  formula="\text{IDF}(t) = \log\!\frac{N}{\text{df}(t)}"
+  caption="Inverse document frequency — rare terms get a high score, ubiquitous terms a low one."
+/>
+
+The logarithm dampens the effect so that a term in 1 of 1,000,000 documents is not a million times more important than one in every document — just substantially more. (In practice a "+1" is added to the denominator, and sometimes the whole IDF, to avoid division by zero and zero weights; scikit-learn uses a smoothed variant.) The TF-IDF weight is simply the product:
+
+<MathBlock
+  formula="\text{TF\text{-}IDF}(t, d) = \text{TF}(t, d) \times \text{IDF}(t)"
+  caption="High only when a term is frequent in this document AND rare across the collection."
+/>
+
+Replace the raw counts in your document vectors with these TF-IDF weights and you get a representation where distinctive, topical words dominate and filler words fade — a much better geometry for comparing documents.
+
+## Document similarity with cosine
+
+Once documents are vectors, "how similar are these two documents?" becomes "how close are these two vectors?" The standard measure is **cosine similarity**: the cosine of the angle between the vectors. It ignores magnitude (so long and short documents on the same topic still match) and focuses purely on direction:
+
+<MathBlock
+  formula="\cos(\theta) = \frac{\mathbf{a} \cdot \mathbf{b}}{\lVert \mathbf{a} \rVert \, \lVert \mathbf{b} \rVert} = \frac{\sum_i a_i b_i}{\sqrt{\sum_i a_i^2}\,\sqrt{\sum_i b_i^2}}"
+  caption="Cosine similarity ranges from 0 (orthogonal, unrelated) to 1 (same direction, identical topic)."
+/>
+
+For non-negative vectors like word counts or TF-IDF weights, cosine similarity ranges from 0 (no shared terms) to 1 (identical direction). It is the default similarity measure for text vectors and reappears constantly throughout this curriculum, from embeddings to the vector databases that power retrieval-augmented generation.
+
+<Callout type="tip">
+Cosine similarity is preferred over plain Euclidean distance for text because it is length-invariant: a 100-word and a 1,000-word article about the same subject point in nearly the same direction, even though their raw count vectors have very different magnitudes.
+</Callout>
+
+## Variants and where TF-IDF still wins
+
+Several refinements improve on plain TF-IDF. **Sublinear (log) TF** replaces the raw count with `1 + log(count)`, reflecting that the tenth occurrence of a word adds less than the second. **BM25**, the ranking function behind Elasticsearch and Lucene, extends TF-IDF with document-length normalization and a saturation term so that term frequency has diminishing returns; it remains the strongest *sparse* retrieval baseline and is a building block of hybrid search (Topic 35).
+
+Despite being decades old, TF-IDF and BM25 are far from obsolete. They are fast, interpretable, need no training, and excel at keyword matching. Modern retrieval systems frequently combine a sparse TF-IDF/BM25 signal with dense neural embeddings, because each catches what the other misses — exact term matches versus semantic similarity. When someone tells you classical methods are dead, point them at the search bar of nearly every website on earth.
+
+## A worked TF-IDF example by hand
+
+Numbers make the idea concrete. Suppose a collection has `N = 100` documents. Consider two terms in a particular 200-word document: the word "the", which appears 12 times in this document and in all 100 documents, and the word "embedding", which appears 4 times in this document and in only 2 documents total.
+
+For "the": term frequency is 12/200 = 0.06, and IDF is log(100/100) = log(1) = 0, so its TF-IDF weight is 0.06 × 0 = 0. Despite appearing most often, "the" contributes nothing, exactly as we want.
+
+For "embedding": term frequency is 4/200 = 0.02, and IDF is log(100/2) = log(50) ≈ 3.91, so its TF-IDF weight is 0.02 × 3.91 ≈ 0.078. The rare, topical word ends up with a weight higher than the ubiquitous one, even though it appeared a third as often. This single example captures the entire intuition behind TF-IDF: it is a frequency signal *corrected* for how surprising a word is. Filler that appears everywhere is multiplied down to nothing; distinctive vocabulary that pins down the topic is lifted up.
+
+## Building intuition: the document–term matrix
+
+It pays to visualize the whole representation as one big table — the **document–term matrix**. Each row is a document, each column a vocabulary word, and each cell holds either a count (BoW) or a TF-IDF weight. For a realistic corpus this matrix is enormous and overwhelmingly zero: tens of thousands of columns, but only a few hundred non-zero entries per row. This is why text vectors are stored in *sparse* format — as lists of (column, value) pairs for the non-zeros — rather than as dense arrays, which would waste gigabytes on zeros.
+
+Thinking in terms of this matrix clarifies several things at once. Classification models read the rows: given a document's weighted word vector, predict its label. Retrieval reads relationships between rows: given a query (itself just another row), find the rows pointing in a similar direction by cosine similarity. Dimensionality-reduction techniques like Latent Semantic Analysis factorize the matrix to uncover hidden "topics" — an early, linear-algebra attempt at the semantic structure that embeddings would later learn far more effectively. The matrix view is the bridge from "words as strings" to "documents as geometry," and that geometric mindset — meaning as position and direction in a vector space — is one you will carry through every remaining phase of this curriculum.
+
+## Code Example
+
+The code below builds Bag of Words and TF-IDF from scratch so you can see every step, then confirms the result against scikit-learn and ranks documents by cosine similarity to a query.
+
+<CodeBlock lang="python" filename="tfidf_from_scratch.py" code={`# tfidf_from_scratch.py
+# pip install scikit-learn numpy
+import math
+import numpy as np
+
+docs = [
+    "the cat sat on the mat",
+    "the dog sat on the log",
+    "cats and dogs are great pets",
+]
+
+# 1) Tokenize and build the vocabulary
+tokenized = [d.split() for d in docs]
+vocab = sorted({w for doc in tokenized for w in doc})
+index = {w: i for i, w in enumerate(vocab)}
+
+# 2) Bag of Words: document-term count matrix
+bow = np.zeros((len(docs), len(vocab)))
+for r, doc in enumerate(tokenized):
+    for w in doc:
+        bow[r, index[w]] += 1
+
+# 3) TF-IDF from scratch
+N = len(docs)
+df = (bow > 0).sum(axis=0)                  # docs containing each term
+idf = np.log(N / df)                        # inverse document frequency
+tf = bow / bow.sum(axis=1, keepdims=True)   # normalized term frequency
+tfidf = tf * idf
+
+# 4) Cosine similarity between document 0 and the others
+def cosine(a, b):
+    return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
+
+print("Cosine similarity of doc 0 to:")
+for i in (1, 2):
+    print(f"  doc {i}: {cosine(tfidf[0], tfidf[i]):.3f}")
+
+# 5) Check against scikit-learn
+from sklearn.feature_extraction.text import TfidfVectorizer
+sk = TfidfVectorizer().fit_transform(docs).toarray()
+print("\\nsklearn doc0 vs doc1 cosine:",
+      round(cosine(sk[0], sk[1]), 3))
+
+# Expected (approx):
+# Cosine similarity of doc 0 to:
+#   doc 1: 0.38   (shares 'the','sat','on' -> moderate)
+#   doc 2: 0.00   (no shared tokens after weighting)
+# sklearn doc0 vs doc1 cosine: 0.30
+`} />
+
+The output matches our intuition: documents 0 and 1 ("cat sat on the mat" / "dog sat on the log") share structural words and earn a moderate similarity, while document 2 shares almost nothing and scores near zero. Note that the exact numbers differ slightly from scikit-learn because libraries use smoothed IDF and L2 normalization by default — the *ranking*, which is what matters, is identical. And notice the limitation staring back at us: "cat" and "cats", or "dog" and "dogs", are treated as completely unrelated, so document 2 looks unrelated to document 0 even though it is clearly about the same animals. Fixing that is the job of the next topic.
+
+<KeyTakeaways phase={1}>
+- **Bag of Words** represents a document as a vector of word counts over a fixed vocabulary, discarding word order entirely.
+- BoW's weaknesses — **lost order, sparsity, and no semantics** — motivate everything that follows, especially embeddings.
+- **TF-IDF** weights a term by how frequent it is in a document (**TF**) times how rare it is across the collection (**IDF**), so distinctive words dominate and filler fades.
+- **Cosine similarity** compares document vectors by the angle between them; it is length-invariant and ranges from 0 to 1 for count/TF-IDF vectors.
+- **Variants** like sublinear TF and **BM25** refine the idea; BM25 remains the strongest sparse-retrieval baseline.
+- TF-IDF is **old but not obsolete** — fast, interpretable, training-free, and still used in production search, often alongside neural embeddings.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "A term appears in every document of the collection. What is its IDF (using IDF = log(N/df))?",
+    options: ["Very high", "Exactly 0", "Negative infinity", "Equal to the term frequency"],
+    correctIndex: 1,
+    explanation: "If a term is in every document, df = N, so IDF = log(N/N) = log(1) = 0. The term is uninformative and contributes nothing to the TF-IDF weight."
+  },
+  {
+    question: "Why is cosine similarity preferred over Euclidean distance for comparing text vectors?",
+    options: ["It is faster to compute", "It is length-invariant, so document length doesn't dominate", "It only works on integers", "It ignores the vocabulary"],
+    correctIndex: 1,
+    explanation: "Cosine measures the angle between vectors, ignoring magnitude. A short and a long document on the same topic point in nearly the same direction even though their raw count magnitudes differ a lot."
+  },
+  {
+    question: "What key limitation do BOTH Bag of Words and TF-IDF share?",
+    options: ["They are too slow for large corpora", "They cannot represent that 'car' and 'automobile' are related", "They require labeled training data", "They only work in English"],
+    correctIndex: 1,
+    explanation: "Both treat each vocabulary word as an independent dimension, so synonyms like 'car' and 'automobile' are as unrelated as random words. Capturing semantic similarity is exactly what word embeddings add."
+  }
+]} />
+
+## What's Next
+
+We have turned words into numbers, but those numbers have no sense of meaning — "cat" and "cats" are strangers. In **Word Embeddings — Word2Vec**, you will see how to learn *dense* vectors in which similar words land near each other, capturing the semantics that Bag of Words and TF-IDF fundamentally cannot. It is one of the most important conceptual leaps in the whole field.

@@ -1,0 +1,196 @@
+---
+title: "What Are AI Agents? Types & Architecture"
+subtitle: "Beyond chatbots — LLMs that plan, act, and complete long tasks"
+phase: 5
+topicNumber: 39
+slug: "ai-agents-overview"
+readingTime: 13
+prerequisites: ["prompt-engineering"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('ai-agents-overview');
+
+<TopicHero topic={topic} />
+
+A chatbot answers; an **agent** acts. The final phase of this curriculum is about systems that do not just respond to a single message but pursue a goal over many steps — reasoning about what to do, taking actions in the world through tools, observing the results, and adapting until the task is done. This shift from *answering* to *acting* is the most consequential development in applied AI since the LLM itself, and it is what powers coding assistants, research agents, and the autonomous systems reshaping how software gets built. This topic defines what an agent is, how it differs from a chatbot, the anatomy that all agents share, and the major agent types.
+
+Everything in Phase 5 builds on this foundation. The ReAct loop (Topic 40), tool use (Topic 41), frameworks (Topics 42-43), memory (Topic 44), multi-agent systems (Topic 45), planning (Topic 46), evaluation (Topic 47), and production deployment (Topic 48) are all elaborations of the core idea introduced here: an LLM in a loop, equipped with tools, pursuing a goal.
+
+## What is an AI agent?
+
+An **AI agent** is a system that uses an LLM to autonomously pursue a goal by perceiving its situation, reasoning about what to do, taking actions through tools, and observing the results — repeating until the goal is achieved. The defining feature is the **loop**: an agent does not produce one output and stop; it acts, observes, and decides again, potentially many times. The LLM serves as the agent's reasoning engine — the "brain" — while tools give it hands to affect the world and memory gives it continuity across steps.
+
+The classic framing is **perception → reasoning → action → environment**. The agent perceives its current state (the task, prior observations), reasons about the best next action, acts on the environment (calls a tool), and the environment returns a new observation, closing the loop. This is the same structure as a human working through a task: assess, decide, do, check, repeat.
+
+## How agents differ from chatbots
+
+The distinction is fundamental. A **chatbot** maps one input to one output: you ask, it answers, the interaction is stateless and single-step. An **agent** pursues a goal over *multiple* steps, taking actions between thoughts and using the results of those actions to inform what it does next. Ask a chatbot "what's the weather in Paris and should I pack an umbrella?" and it answers from its frozen knowledge (possibly wrong). Ask an agent the same, and it *calls* a weather API, reads the real forecast, and reasons from actual data. The agent can *do things* — search, compute, query, write files, call other services — that a chatbot can only describe.
+
+<Callout type="tip">
+The litmus test: if the system can only produce text in response to text, it is a chatbot. If it can take actions in the world, observe their results, and decide what to do next based on those results, it is an agent.
+</Callout>
+
+## Agent anatomy
+
+Every agent, however simple or sophisticated, is built from four components:
+
+- **The LLM (brain)**: the reasoning engine that decides what to do at each step. Its quality largely determines the agent's capability — a smarter model plans better, recovers from errors better, and uses tools more reliably.
+- **Tools**: the functions the agent can call to act — web search, code execution, database queries, API calls, file operations. Tools are how the agent affects and senses the world beyond text.
+- **Memory**: what the agent remembers, within a task (the steps so far) and across sessions (persistent knowledge). Memory gives the agent continuity.
+- **The environment**: the world the agent operates in and gets feedback from — a codebase, the web, a sandbox, an operating system.
+
+The art of building agents is assembling these four pieces so the LLM can effectively perceive, decide, and act.
+
+## Types of agents
+
+Agents span a spectrum of autonomy and structure:
+
+- **Tool-use agents**: a single LLM with a set of tools, calling them as needed to answer or act. The simplest and most common.
+- **ReAct agents**: tool-use agents that explicitly interleave reasoning and acting in a Thought-Action-Observation loop (Topic 40).
+- **Plan-and-execute agents**: agents that first make an explicit plan, then execute its steps — better for complex, multi-step tasks (Topic 46).
+- **Multi-agent systems**: several specialized agents collaborating, often coordinated by a supervisor (Topic 45).
+- **Autonomous agents**: AutoGPT-style systems that pursue open-ended goals with minimal human input — ambitious but currently the least reliable.
+
+## The agent loop and the harness
+
+At the center of every agent is the loop: **Think → Act → Observe → Repeat.** The LLM thinks about what to do, acts by calling a tool, observes the result, and loops back to think again with the new information, until it decides the task is complete or hits a limit. Around this loop sits the **harness** — the infrastructure that makes the loop work: parsing the LLM's chosen actions, executing tools safely, feeding observations back into the context, enforcing limits (max iterations, timeouts), and handling errors. The LLM is the brain, but the harness is the nervous system that connects it to the world, and much of agent engineering is harness engineering.
+
+<ComparisonTable
+  phase={5}
+  headers={["Type", "Structure", "Autonomy", "Best for"]}
+  rows={[
+    ["Tool-use agent", "One LLM + tools", "Low", "Single-step tool tasks"],
+    ["ReAct agent", "Thought-Action-Observation loop", "Medium", "Multi-step reasoning + tools"],
+    ["Plan-and-execute", "Plan, then execute steps", "Medium-high", "Complex decomposable tasks"],
+    ["Multi-agent", "Specialists + coordinator", "High", "Parallel, specialized work"],
+    ["Autonomous (AutoGPT)", "Open-ended self-direction", "Highest", "Ambitious goals (least reliable)"],
+  ]}
+  caption="Agent types span increasing autonomy and structure."
+/>
+
+## Capabilities and limitations
+
+Today's agents are genuinely capable: they write and debug code across many files, conduct multi-step research, analyze data, and automate workflows that once needed a human. But they have real limitations. They can get stuck in loops, take wrong actions confidently, lose track of long tasks, and fail unpredictably on edge cases. They are powerful but not yet fully reliable, which is why production agents need careful guardrails, human oversight, and the evaluation and safety practices of Topics 47-48. The trajectory is steep, though — each model generation makes agents meaningfully more capable, because better reasoning compounds across every step of the loop.
+
+## The agentic spectrum: workflows versus agents
+
+It helps to see "agent" not as a binary but as a *spectrum* of how much the LLM controls its own path. At one end are **workflows**: systems where the LLM is called at fixed points in a predetermined sequence written by a human — extract this, then summarize that, then classify the result. The control flow is hard-coded; the LLM fills in steps but does not decide the structure. At the other end are **agents** in the fullest sense: the LLM dynamically decides which actions to take and in what order, directing its own control flow toward a goal.
+
+Most useful real systems sit somewhere in between, and recognizing where yours sits is a key design decision. Workflows are more *predictable, debuggable, and cheaper* because their structure is fixed; agents are more *flexible and capable* because they adapt, but they are harder to control and reason about. A common and wise piece of advice is to prefer the simplest thing that works: if a fixed workflow solves your problem, use it, and reach for full agentic autonomy only when the task genuinely requires the LLM to decide its own steps — because that autonomy is exactly what makes agents both powerful and unpredictable. Much of good agent engineering is restraint: giving the model just enough freedom to handle the variability of the task and no more, so the system stays as controllable as the problem allows.
+
+## Why agents work now
+
+Agents are not a new idea — the perception-reasoning-action loop predates LLMs by decades in robotics and classical AI. What changed is that LLMs finally made the "reasoning" step good enough to drive the loop on open-ended, real-world tasks. Three capabilities had to mature. First, **instruction-following and reasoning** (Phases 2-3) gave models the ability to decompose a goal and decide sensible next steps. Second, **tool use / function calling** (Topic 41) gave a reliable interface for the model to request actions in a structured, parseable way. Third, **long context** let the model hold the accumulating history of thoughts, actions, and observations needed to stay coherent across many steps.
+
+Before these matured, agent loops existed but flailed — the model could not reason well enough to choose good actions or recover from mistakes, so the loop wandered or stalled. The dramatic improvement in agent reliability over recent model generations is almost entirely downstream of better base models: a smarter brain makes better decisions at every turn of the loop, and because errors compound across steps, even modest per-step improvements translate into large gains in end-to-end task success. This is why agent capability tracks frontier model capability so tightly, and why defaulting to the most capable available model matters even more for agents than for single-shot tasks — the model's quality is multiplied across every step it takes.
+
+## Real-world agent applications
+
+Agents are already doing serious work, and surveying where they succeed clarifies what they are for. **Coding agents** are the standout: they read and modify code across many files, run tests, debug failures, and complete substantial engineering tasks with a human reviewing the result. **Research agents** gather information from many sources, synthesize it, and produce reports, calling search and browsing tools to ground their findings in current data. **Data-analysis agents** write and execute code to explore datasets, answer questions, and generate visualizations. **Customer-support and operations agents** take actions in real systems — issuing refunds, updating records, escalating issues — not just answering questions.
+
+The common thread is tasks that are *multi-step*, *benefit from tools*, and *tolerate or include human oversight*. Agents excel where a goal requires gathering information and taking actions in sequence, adapting based on what is found, rather than producing a single fixed output. They are weakest where reliability must be absolute with no human in the loop, because their occasional confident mistakes are still a real risk. The practical pattern that has emerged is the *human-in-the-loop agent*: the agent does the laborious multi-step work and a human supervises, reviews, and approves consequential actions. This combination — agent speed and breadth plus human judgment and accountability — is currently the sweet spot, and it is the frame to keep in mind as the rest of this phase builds increasingly capable agents. The goal is not to remove humans but to amplify them, automating the tedious multi-step execution while keeping a person in control of the outcomes that matter.
+
+## Code Example
+
+The code builds a minimal but complete agent: an LLM with one tool, looping until it produces a final answer. This skeleton is the seed of every agent in this phase.
+
+<CodeBlock lang="python" filename="minimal_agent.py" code={`# minimal_agent.py
+# pip install anthropic
+import os, json
+from anthropic import Anthropic
+
+client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+# --- A tool the agent can call ---
+def get_weather(city):
+    fake = {"Paris": "12C, rain", "Tokyo": "22C, clear"}
+    return fake.get(city, "unknown")
+
+tools = [{
+    "name": "get_weather",
+    "description": "Get the current weather for a city.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"city": {"type": "string"}},
+        "required": ["city"],
+    },
+}]
+
+# --- The agent loop: think -> act -> observe -> repeat ---
+def run_agent(task, max_steps=5):
+    messages = [{"role": "user", "content": task}]
+    for step in range(max_steps):
+        resp = client.messages.create(
+            model="claude-opus-4-8", max_tokens=500,
+            tools=tools, messages=messages,
+        )
+        messages.append({"role": "assistant", "content": resp.content})
+
+        if resp.stop_reason != "tool_use":
+            # No tool call -> the agent has its final answer
+            return "".join(b.text for b in resp.content if b.type == "text")
+
+        # Execute each requested tool and feed observations back (OBSERVE)
+        results = []
+        for block in resp.content:
+            if block.type == "tool_use":
+                obs = get_weather(**block.input)            # ACT
+                results.append({"type": "tool_result",
+                                "tool_use_id": block.id, "content": obs})
+        messages.append({"role": "user", "content": results})
+    return "Stopped: max steps reached."
+
+print(run_agent("What's the weather in Paris, and should I take an umbrella?"))
+
+# Expected:
+# The model calls get_weather(city="Paris"), observes "12C, rain",
+# then answers: "It's 12C and raining in Paris, so yes — take an umbrella."
+`} />
+
+This 40-line skeleton is a real agent. The loop calls the model; if the model requests a tool (`stop_reason == "tool_use"`), the harness executes it and feeds the result back as an observation; otherwise the model has its answer and the loop ends. The `max_steps` guard prevents infinite loops. Everything in Phase 5 — ReAct's explicit reasoning, multiple tools, memory, planning, multi-agent coordination — extends this fundamental Think-Act-Observe loop.
+
+<KeyTakeaways phase={5}>
+- An **agent** uses an LLM to pursue a goal over **multiple steps** — reasoning, acting through tools, observing results, and adapting — unlike a single-step chatbot.
+- The core structure is **perception → reasoning → action → environment**, realized as a **Think → Act → Observe → Repeat** loop.
+- Every agent has four parts: the **LLM (brain)**, **tools** (hands), **memory** (continuity), and the **environment** it acts on.
+- Agents differ from chatbots by being able to **take actions and use their results**, not just produce text.
+- Types span increasing autonomy: **tool-use, ReAct, plan-and-execute, multi-agent, and autonomous** agents.
+- The **harness** — parsing actions, running tools safely, feeding back observations, enforcing limits — is as important as the LLM; agent engineering is largely harness engineering.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What is the key difference between an agent and a chatbot?",
+    options: ["Agents are larger models", "An agent can take actions in the world, observe their results, and decide what to do next over multiple steps; a chatbot maps one input to one output", "Chatbots use attention, agents do not", "There is no difference"],
+    correctIndex: 1,
+    explanation: "A chatbot produces a single text response. An agent runs a loop — taking actions through tools, observing results, and adapting — to pursue a goal across multiple steps."
+  },
+  {
+    question: "What are the four components of an agent's anatomy?",
+    options: ["Encoder, decoder, attention, FFN", "LLM (brain), tools, memory, and environment", "Prompt, model, output, log", "Query, key, value, softmax"],
+    correctIndex: 1,
+    explanation: "Every agent combines an LLM as the reasoning brain, tools to act, memory for continuity, and an environment it perceives and affects."
+  },
+  {
+    question: "What is the 'agent loop'?",
+    options: ["A training procedure", "Think → Act → Observe → Repeat — the LLM decides an action, executes it, reads the result, and decides again until done", "A type of attention", "An infinite recursion bug"],
+    correctIndex: 1,
+    explanation: "The agent loop is the cycle of reasoning about the next action, taking it via a tool, observing the result, and looping back with that new information until the task is complete or a limit is hit."
+  }
+]} />
+
+## What's Next
+
+The agent loop needs structure to work reliably. The foundational pattern that makes it work — explicitly interleaving reasoning with action — has a name and a paper. In **ReAct Pattern — Reasoning + Acting**, we study and build the Thought-Action-Observation loop that underlies essentially every tool-using agent.

@@ -1,0 +1,39 @@
+---
+import TopicLayout from '../../layouts/TopicLayout.astro';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import { getCollection, render } from 'astro:content';
+import { TOPICS, getTopicBySlug } from '../../data/curriculum';
+
+export async function getStaticPaths() {
+  return TOPICS.map((t) => ({ params: { slug: t.slug }, props: { slug: t.slug } }));
+}
+
+const { slug } = Astro.props as { slug: string };
+const topic = getTopicBySlug(slug)!;
+
+// Render the MDX entry once it exists (Step 9). Until then, show a placeholder.
+const entries = await getCollection('topics');
+const entry = entries.find((e) => e.data.slug === slug);
+
+let Content: any = null;
+let headings: { depth: number; slug: string; text: string }[] = [];
+if (entry) {
+  const rendered = await render(entry);
+  Content = rendered.Content;
+  headings = rendered.headings;
+}
+---
+<TopicLayout topic={topic} headings={headings}>
+  {Content ? (
+    <Content />
+  ) : (
+    <>
+      <TopicHero topic={topic} />
+      <Callout type="info" title="Content in progress">
+        The full lesson for this topic is being written (Step 9). The page layout,
+        navigation, and progress tracking are already live.
+      </Callout>
+    </>
+  )}
+</TopicLayout>

@@ -1,0 +1,60 @@
+---
+/**
+ * BackToTop (PRD §F12) — phase-colored circular button, bottom-right, that
+ * fades in after 400px of scroll and smooth-scrolls to the top.
+ */
+---
+
+<button id="back-to-top" type="button" aria-label="Back to top" title="Back to top">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 19V5M5 12l7-7 7 7" />
+  </svg>
+</button>
+
+<style>
+  #back-to-top {
+    position: fixed;
+    right: 1.5rem;
+    bottom: 1.5rem;
+    z-index: 40;
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border-radius: 9999px;
+    border: none;
+    cursor: pointer;
+    color: #fff;
+    background: var(--accent, var(--phase-1));
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(8px);
+    transition: opacity 200ms ease, transform 200ms ease, visibility 200ms;
+  }
+  #back-to-top.is-visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+  #back-to-top:hover {
+    filter: brightness(1.08);
+  }
+  @media print {
+    #back-to-top { display: none; }
+  }
+</style>
+
+<script>
+  const btn = document.getElementById('back-to-top');
+  if (btn) {
+    const onScroll = () => {
+      btn.classList.toggle('is-visible', window.scrollY > 400);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    btn.addEventListener('click', () => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
+</script>

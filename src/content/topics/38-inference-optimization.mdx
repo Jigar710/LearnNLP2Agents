@@ -1,0 +1,175 @@
+---
+title: "Inference Optimization — KV Cache, Flash Attention & vLLM"
+subtitle: "Making LLMs fast enough for real production use"
+phase: 4
+topicNumber: 38
+slug: "inference-optimization"
+readingTime: 16
+prerequisites: ["transformer-architecture"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('inference-optimization');
+
+<TopicHero topic={topic} />
+
+A model that gives brilliant answers too slowly, or at ruinous cost, cannot ship. **Inference optimization** is the engineering that makes large language models fast and affordable to serve — and it is a different problem from training. Generation is sequential, memory-bound, and unpredictable in length, which creates bottlenecks that clever systems work around: caching past computation, restructuring attention to be memory-efficient, batching requests dynamically, and managing GPU memory like an operating system. This topic covers the key techniques — KV cache, Flash Attention, continuous batching, PagedAttention, vLLM, and speculative decoding — that turn a research model into a production service.
+
+This closes Phase 4. You can now build, evaluate, and *serve* LLM applications efficiently, the complete applied-engineering skill set.
+
+## Prefill vs decode
+
+LLM inference has two distinct phases with very different performance profiles. **Prefill** processes the entire prompt in one parallel forward pass — compute-heavy but fast, since all prompt tokens are handled at once. **Decode** then generates output tokens one at a time, each requiring a full forward pass through the model, and is inherently *sequential*. Decode dominates the time for long outputs and is **memory-bandwidth bound** — the GPU spends most of its time reading the model's weights and the cache from memory, not computing. Almost every optimization targets the decode phase, because that is where the time goes.
+
+## The KV cache
+
+The foundational decode optimization is the **KV cache** (introduced in Topic 16). When generating token 100, naive inference would reprocess tokens 1-99 — but their attention keys and values never change, thanks to the causal mask, so recomputing them is pure waste. The KV cache stores each token's keys and values once; each new step computes Q, K, V only for the *single* new token and attends against the cached K, V of all previous tokens. This turns each step from "reprocess the whole sequence" into "process one token against a cache," a massive speedup that every serving system relies on.
+
+## KV cache memory: the new bottleneck
+
+The KV cache trades compute for memory, and that memory becomes the binding constraint. The cache grows with sequence length *and* batch size — every token of every concurrent request needs its keys and values stored — and for long contexts and many users it can consume more GPU memory than the model weights themselves. Managing KV-cache memory efficiently is *the* central problem of high-throughput LLM serving, and it is exactly what PagedAttention solves.
+
+<Callout type="tip">
+The KV cache is the master trade-off of LLM serving: it eliminates redundant compute at the cost of memory that grows with context length times batch size. Most serving innovations are really about managing this cache better.
+</Callout>
+
+## Flash Attention
+
+**Flash Attention** (Dao et al. 2022) makes attention itself faster and more memory-efficient. Standard attention computes the full `n × n` score matrix and writes it to GPU memory, then reads it back for the softmax and the value-weighted sum — and that memory traffic, not the arithmetic, is the bottleneck. Flash Attention is **IO-aware**: it tiles the computation, computing attention block by block in fast on-chip memory and never materializing the full score matrix in slow memory, using an online softmax to combine blocks. It computes *exactly* the same result, just with far less memory movement, yielding large speedups and enabling longer sequences. **Flash Attention 2 and 3** refine the parallelization and exploit newer GPU features for further gains.
+
+## Continuous batching
+
+Serving many users efficiently requires batching, but LLM requests finish at different times (different output lengths), so naive static batching wastes the GPU waiting for the slowest request in a batch. **Continuous batching** (a.k.a. in-flight batching) solves this: as soon as one request in the batch finishes, a new request takes its slot, keeping the GPU continuously busy. This dramatically raises throughput by eliminating idle time, and it is a core feature of modern serving engines.
+
+## PagedAttention and vLLM
+
+**PagedAttention** (Kwon et al. 2023), the innovation behind **vLLM**, manages the KV cache like an operating system manages virtual memory. Instead of allocating one large contiguous block per request — which causes fragmentation and wasted memory — it splits the cache into fixed-size *pages* allocated on demand, so memory is used efficiently and shared where possible (e.g. across requests with a common prompt prefix). This lets vLLM serve far more concurrent requests on the same hardware, achieving much higher throughput than naive serving. **vLLM** packages PagedAttention with continuous batching and an OpenAI-compatible API, and it has become a default for self-hosted LLM serving.
+
+## Speculative decoding and tensor parallelism
+
+Two more techniques. **Speculative decoding** accelerates generation with a small, fast *draft* model that proposes several tokens, which the large *target* model then verifies in a single parallel pass — accepting the correct prefix and rejecting the rest. Because the target model verifies multiple tokens at once instead of generating one at a time, latency drops with *no change* to output quality. **Tensor parallelism** splits a model too large for one GPU across several, partitioning each layer's computation so multiple GPUs cooperate on one forward pass — essential for serving the largest models.
+
+## Benchmarking inference
+
+You optimize what you measure, so know the key serving metrics. **Throughput** (tokens/second across all requests) measures total capacity. **Time-to-first-token (TTFT)** measures responsiveness — how long until the user sees something, dominated by prefill. **Inter-token latency** measures how fast tokens stream after the first. **Tokens per second per request** measures perceived speed. These trade off: continuous batching raises throughput but can slightly raise per-request latency. Pick the metric that matches your application — interactive chat cares about TTFT, batch processing cares about throughput.
+
+## Prefix caching and prompt reuse
+
+A powerful optimization that PagedAttention's paged design enables is **prefix caching**: when many requests share a common prefix — the same long system prompt, the same few-shot examples, the same retrieved document — the KV cache for that shared prefix can be computed *once* and reused across all of them, rather than recomputed per request. Because the cache is stored in pages, identical prefixes can point at the same pages, sharing both the memory and the compute that produced it.
+
+The payoff is large in exactly the situations this phase has been building toward. A RAG system prepends the same instructions to every query; a chat application carries a long, fixed system prompt; an agent reuses the same tool definitions across many steps. In all of these, a substantial chunk of every prompt is identical, and prefix caching turns that repeated prefill from a per-request cost into a one-time cost. This is why providers can offer "prompt caching" features that dramatically cut the cost and latency of requests sharing a long static prefix, and why structuring your prompts so the *static* parts come first and the *variable* parts last is not just good for the "lost in the middle" effect but also for caching. The architecture of efficient serving and the craft of prompt design meet here: a prompt laid out with its reusable scaffolding up front is both clearer to the model and cheaper to serve.
+
+## The cost model of LLM serving
+
+To optimize serving you need a mental model of where the cost actually goes, and it is worth making explicit because it guides every decision. The two resources that matter are **GPU compute** and **GPU memory**, and the two phases stress them differently: prefill is compute-bound and scales with prompt length, while decode is memory-bandwidth-bound and scales with the number of tokens generated and the size of the KV cache. The dominant cost for most workloads is decode, which is why output length is often the biggest lever on cost — generating 500 tokens costs far more than generating 50, regardless of prompt size, because each output token is a full sequential forward pass.
+
+This cost model explains many practical choices. It is why concise outputs save money, why streaming improves *perceived* latency without changing total cost, why batching many requests together raises throughput (amortizing the weight reads across more useful work), and why long contexts are expensive (a large KV cache to hold and read). It also explains the recurring advice to default to the most capable model and a clean prompt: a smarter model that solves a task in one concise response can be *cheaper* than a weaker model that needs verbose chain-of-thought or multiple retries, even at a higher per-token price. Reasoning about serving cost in terms of compute, memory, and especially output length — rather than just "price per token" — is what lets you build LLM applications that are not only good but economical, and it is the natural complement to the quality-and-cost evaluation discipline of the previous topic.
+
+## Why serving is its own engineering discipline
+
+It is worth stepping back to appreciate that LLM serving has become a specialized field, distinct from both model training and ordinary web-service engineering. The reason is the unusual shape of the workload: requests with highly variable and unpredictable output lengths, a memory footprint (the KV cache) that grows during a request and depends on inputs you cannot know in advance, a hard tension between latency for interactive users and throughput for batch efficiency, and the need to pack expensive, scarce GPU memory as tightly as possible. No traditional serving stack was designed for these properties, which is why purpose-built engines like vLLM, and the techniques in this topic, emerged.
+
+For a practitioner, the encouraging news is that you usually do not need to implement any of this yourself. Mature open-source engines (vLLM and its peers) and managed inference providers package PagedAttention, continuous batching, prefix caching, quantization support, and speculative decoding behind simple interfaces, so you get most of the benefit with a few lines of configuration. The value of understanding the underlying techniques is not to reimplement them but to *use them well*: to choose the right engine and settings, to structure prompts for caching, to set sensible concurrency and memory limits, to pick the metric (throughput versus time-to-first-token) that matches your application, and to diagnose why a deployment is slow or expensive. Serving is where all the prior phases become a real product that users can actually use, at a cost the business can actually bear — and that final translation, from a capable model to an economical service, is the fitting close to the applied-engineering phase.
+
+## Code Example
+
+The code serves a model with vLLM (PagedAttention + continuous batching) and enables Flash Attention in a HuggingFace model, the two highest-impact serving optimizations.
+
+<CodeBlock lang="python" filename="serve_optimized.py" code={`# serve_optimized.py
+# pip install vllm transformers
+
+# --- vLLM: PagedAttention + continuous batching in a few lines ---
+from vllm import LLM, SamplingParams
+
+llm = LLM(model="meta-llama/Llama-3.1-8B-Instruct",
+          gpu_memory_utilization=0.9,   # PagedAttention uses memory efficiently
+          max_num_seqs=256)             # high concurrency via continuous batching
+
+prompts = ["Explain KV cache in one sentence.",
+           "What is Flash Attention?",
+           "Why is decode memory-bound?"]
+params = SamplingParams(temperature=0.7, max_tokens=64)
+
+# vLLM batches these continuously across the GPU for high throughput
+outputs = llm.generate(prompts, params)
+for o in outputs:
+    print(o.outputs[0].text.strip()[:80])
+
+# To serve an OpenAI-compatible HTTP endpoint instead:
+#   python -m vllm.entrypoints.openai.api_server \\
+#       --model meta-llama/Llama-3.1-8B-Instruct
+
+# --- Enable Flash Attention 2 in a HuggingFace model ---
+# from transformers import AutoModelForCausalLM
+# model = AutoModelForCausalLM.from_pretrained(
+#     "meta-llama/Llama-3.1-8B",
+#     attn_implementation="flash_attention_2",   # IO-aware, exact attention
+#     torch_dtype="bfloat16", device_map="auto",
+# )
+
+# Expected: three answers generated with high GPU utilization; vLLM reports
+# throughput far above naive sequential generation.
+`} />
+
+vLLM turns efficient serving into a few lines: PagedAttention packs the KV cache tightly, continuous batching keeps the GPU saturated across the three (and many more) concurrent requests, and the result is throughput several times higher than naive generation on the same hardware. Flash Attention, a one-line flag, makes each attention computation faster and lighter on memory. Together with quantization (Topic 30), these techniques are what make it economical to serve large models to real users — the final piece of applied LLM engineering.
+
+<PaperLink
+  title="FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness"
+  authors="Dao, Fu, Ermon, Rudra, Ré"
+  year={2022}
+  venue="NeurIPS"
+  url="https://arxiv.org/abs/2205.14135"
+/>
+
+<PaperLink
+  title="Efficient Memory Management for LLM Serving with PagedAttention (vLLM)"
+  authors="Kwon, Li, Zhuang, et al."
+  year={2023}
+  venue="SOSP"
+  url="https://arxiv.org/abs/2309.06180"
+/>
+
+<KeyTakeaways phase={4}>
+- LLM inference splits into **prefill** (parallel, compute-bound) and **decode** (sequential, memory-bandwidth-bound); optimizations target decode, where time is spent.
+- The **KV cache** avoids recomputing past keys/values, but its memory grows with **context length × batch size**, becoming the central serving bottleneck.
+- **Flash Attention** is IO-aware exact attention: it tiles the computation and never materializes the full score matrix, cutting memory traffic for big speedups.
+- **Continuous batching** keeps the GPU busy by swapping in new requests as others finish; **PagedAttention** (vLLM) manages the KV cache like virtual memory for high throughput.
+- **Speculative decoding** uses a draft model to propose tokens the target verifies in parallel — faster with identical output; **tensor parallelism** splits huge models across GPUs.
+- Measure the right metric — **throughput** for batch, **time-to-first-token** for interactive — and combine with quantization to serve large models economically.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What problem does PagedAttention (vLLM) solve?",
+    options: ["Slow training", "Inefficient KV-cache memory management — it pages the cache like virtual memory to avoid fragmentation and serve more concurrent requests", "Tokenization errors", "Low model accuracy"],
+    correctIndex: 1,
+    explanation: "PagedAttention splits the KV cache into fixed-size pages allocated on demand, avoiding the fragmentation and waste of contiguous per-request allocation, which lets vLLM serve far more concurrent requests at higher throughput."
+  },
+  {
+    question: "Why is the decode phase memory-bandwidth bound rather than compute bound?",
+    options: ["It does no computation", "It generates one token at a time, so the GPU spends most time reading weights and the KV cache from memory rather than doing arithmetic", "It uses no attention", "It runs on CPU"],
+    correctIndex: 1,
+    explanation: "Decode produces tokens sequentially, one forward pass each. With little parallel work per step, the bottleneck becomes moving the model weights and KV cache from memory, not the arithmetic itself."
+  },
+  {
+    question: "How does speculative decoding speed up generation without changing output?",
+    options: ["It uses a smaller final model", "A fast draft model proposes several tokens that the large target model verifies in one parallel pass, accepting the correct prefix", "It lowers the temperature", "It skips attention"],
+    correctIndex: 1,
+    explanation: "The draft model guesses multiple tokens cheaply; the target model verifies them all in a single parallel forward pass and keeps the correct prefix. Output matches what the target would have produced alone, but with fewer sequential steps."
+  }
+]} />
+
+## What's Next
+
+You have completed Phase 4: prompting, RAG, evaluation, and efficient serving — the full applied-engineering toolkit. Phase 5 takes the final step, from systems that *answer* to systems that *act*. In **What Are AI Agents? Types & Architecture**, we begin building autonomous, tool-using agents that plan and complete multi-step tasks.

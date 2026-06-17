@@ -1,0 +1,211 @@
+---
+title: "ReAct Pattern — Reasoning + Acting"
+subtitle: "The foundational pattern for all tool-using LLM agents"
+phase: 5
+topicNumber: 40
+slug: "react-pattern"
+readingTime: 15
+prerequisites: ["ai-agents-overview", "advanced-prompting"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: true
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import DiagramWrapper from '../../components/topic/DiagramWrapper.astro';
+import AgentLoop from '../../components/diagrams/AgentLoop.tsx';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('react-pattern');
+
+<TopicHero topic={topic} />
+
+The previous topic introduced the agent loop in the abstract. **ReAct** — short for Reasoning and Acting — is the concrete pattern that makes it work, and it underlies essentially every tool-using LLM agent built today. Its insight is simple but profound: interleave *reasoning* (thinking about what to do) with *acting* (using tools), so that each thought informs the next action and each observation informs the next thought. This tight coupling of reasoning and acting is what lets an agent ground its decisions in real-world feedback rather than spinning out a plan from pure speculation. This topic explains ReAct, why interleaving matters, and how to implement it from scratch.
+
+ReAct is the workhorse pattern of the agentic era. Understanding it deeply — building it yourself without a framework — demystifies every agent library you will later use, because all of them are, at heart, implementations of this loop.
+
+## The ReAct idea
+
+ReAct (Yao et al. 2022) combines two things LLMs do well — reasoning in language and, with tools, acting — into a single interleaved process. Pure Chain-of-Thought (Topic 31) reasons but cannot act, so it is stuck with the model's internal, possibly wrong, knowledge. Pure tool-use can act but without explicit reasoning often chooses actions poorly. ReAct gets the best of both: the model **reasons** about what it needs, **acts** to get it, **observes** the result, and reasons again with that new grounding. Reasoning makes the actions smart; acting makes the reasoning grounded.
+
+## The ReAct format
+
+ReAct structures the agent's output as a repeating sequence of three labelled steps:
+
+- **Thought**: the model reasons about the current situation and decides what to do next.
+- **Action**: the model calls a tool, specifying which one and with what input.
+- **Observation**: the result the tool returns, fed back into the model's context.
+
+The loop repeats — Thought, Action, Observation, Thought, Action, Observation — until the model reasons that it has enough information and produces a final answer. For "What is the capital of the country with the largest population?", a ReAct agent thinks "I need the most populous country," acts by searching, observes "China," thinks "now I need China's capital," acts, observes "Beijing," and answers.
+
+<DiagramWrapper title="The ReAct loop" caption="Step through a Thought → Action → Observation cycle; the Action step highlights the tool call.">
+  <AgentLoop client:visible />
+</DiagramWrapper>
+
+## Why interleaving matters
+
+The power of ReAct is in the *interleaving*. If you reason fully first and only then act (plan-then-execute), your plan is built on assumptions that may be wrong, and you cannot adjust mid-course. If you act without reasoning, you choose actions blindly. By alternating, ReAct lets **reasoning inform each action** (the model thinks before it acts) and **each observation inform the next reasoning** (the model updates its understanding from real results). This makes the agent adaptive: it can discover that an action failed, that its assumption was wrong, or that it needs different information, and adjust on the spot. Interleaving is what turns a brittle plan into a responsive process.
+
+<Callout type="tip">
+ReAct's superpower is course-correction. Because the model reasons fresh after every observation, it can notice "that didn't work" or "this changes things" and adapt — something a fixed upfront plan cannot do. Grounding reasoning in real observations also sharply reduces hallucination.
+</Callout>
+
+## ReAct vs pure prompting vs pure acting
+
+Three ways to use an LLM on a tool-requiring task. **Pure prompting** (CoT) reasons but acts only on internal knowledge — fast, but ungrounded and prone to hallucination on facts it does not know. **Pure acting** calls tools but without a reasoning trace, so it picks actions poorly and cannot explain or adjust. **ReAct** interleaves both, and the original paper showed it beats either alone on knowledge-intensive and decision-making tasks, while also being more interpretable (you can read the agent's thoughts) and more controllable.
+
+## Implementing ReAct: the harness
+
+Building ReAct from scratch reveals what a framework hides. You need: a **prompt** that instructs the model to produce Thought/Action/Observation steps and lists the available tools; a **parser** that extracts the chosen action and its input from the model's output; a **dispatcher** that runs the corresponding tool; a way to **append the observation** back into the conversation; and **safeguards** — a maximum iteration count to prevent infinite loops, and error handling for when a tool fails. Modern model APIs make this cleaner with native tool use (the model returns a structured tool call instead of text you must parse), but the loop is the same.
+
+## Error handling and loop prevention
+
+Two practical concerns dominate real ReAct agents. **Tool failures**: a search returns nothing, an API errors, code throws. The harness must catch these and feed the error back as an observation so the model can react ("that failed, let me try differently") rather than crashing. **Infinite loops**: an agent can get stuck repeating the same failing action. A hard `max_iterations` limit is essential, and good agents also detect repetition and degrade gracefully — returning a best-effort answer or asking for help rather than looping forever. These safeguards are not optional polish; they are what make an agent safe to run unattended.
+
+## ReAct as the foundation of frameworks
+
+When you use LangChain's agents, LangGraph, or any agent framework (Topics 42-43), you are using ReAct or a close variant under the hood. `create_react_agent` is named for exactly this pattern. Understanding ReAct from scratch means you understand what those frameworks do, can debug them when they misbehave, and can decide when their abstraction helps and when raw control is better.
+
+## Context management in long agent runs
+
+A practical challenge appears the moment ReAct agents tackle non-trivial tasks: the conversation grows. Every Thought, Action, and Observation is appended to the context, so a task requiring twenty tool calls accumulates a long, dense history of reasoning and results. Eventually this bumps against the context window, and even before that, a bloated context raises cost and latency on every step and can degrade the model's focus (the "lost in the middle" effect from Topic 31). Managing this growing context is one of the central engineering problems of real agents.
+
+Several strategies help, and they preview the memory topic ahead. You can **summarize** older steps, compressing a long history of completed sub-tasks into a short note so the model keeps the gist without the bulk. You can **prune** observations that are no longer relevant — a large tool output needed for one step can be dropped once its conclusion is recorded. You can store detailed results in **external memory** and keep only references in the context. And you can structure the task so that completed phases are checkpointed and their intermediate clutter discarded. The unifying principle is that the agent's working context should hold what it *currently needs to reason well*, not an ever-growing transcript of everything it has ever done. Getting this right is much of what separates an agent that completes a long task coherently from one that loses the thread halfway through, and it is exactly why memory (Topic 44) is a first-class concern in agent design rather than an afterthought.
+
+## ReAct's failure modes
+
+Honesty about where ReAct breaks makes you a better agent builder. The most common failure is **looping**: the agent repeats the same action, getting the same unhelpful observation, without recognizing it is stuck — a wrong query that keeps returning nothing, retried indefinitely until the iteration cap fires. A second is **derailment**: a single misleading observation sends the agent down a wrong path, and because each subsequent thought builds on the last, the error compounds rather than self-corrects. A third is **giving up too early or too late** — stopping before it has enough information, or grinding on long after it should have asked for help.
+
+These failures share a root cause: the agent's reasoning is only as good as the model driving it, and even strong models occasionally misjudge. The mitigations are partly better models (a smarter brain loops less and derails less) and partly harness design — detecting repeated actions and forcing a different approach, capping iterations, validating that progress is being made, and escalating to a human when the agent is clearly stuck. Knowing these failure modes also shapes how you *evaluate* agents (Topic 47): you watch not just whether the final answer is right but whether the trajectory was sensible, efficient, and free of loops. An agent that stumbles to the right answer through a tangle of repeated and wrong actions is fragile even when it succeeds, and recognizing that fragility in the trace is how you catch problems before they reach production.
+
+## Variations on the pattern
+
+ReAct is a foundation, not the last word, and several refinements build on it. **Reflexion** adds a reflection step where the agent reviews a failed attempt, articulates what went wrong, and stores that lesson to do better on a retry — a memory of mistakes layered onto the ReAct loop. **Plan-and-execute** (Topic 46) front-loads an explicit plan and then executes its steps, trading some of ReAct's adaptivity for clearer structure on long tasks. **Tree-based** agent search applies the Tree-of-Thoughts idea (Topic 32) to actions, exploring multiple action paths and backtracking from dead ends rather than committing to one trajectory.
+
+The right variation depends on the task. Pure ReAct shines when the path is genuinely unpredictable and the agent must adapt step by step to what it finds — exploratory research, debugging, interactive tasks. Plan-and-execute suits tasks with a clearer structure that benefits from upfront decomposition. Reflexion helps when the agent gets multiple attempts and can learn from failures within a session. These are not competing camps so much as a toolkit, and sophisticated agents combine them — planning at a high level, ReAct-ing within each step, and reflecting on failures. The constant across all of them is the core insight you now hold from ReAct: that grounding reasoning in real observations, and reasoning about real observations, is what makes an LLM into an effective agent. Everything else is structure layered on that foundation, and the rest of this phase is, in large part, the study of which structures to add and when.
+
+## Code Example
+
+The code implements a complete ReAct agent from scratch using native tool use — the loop, multiple tools, observation feedback, and a max-iteration safeguard.
+
+<CodeBlock lang="python" filename="react_agent.py" code={`# react_agent.py
+# pip install anthropic
+import os, json
+from anthropic import Anthropic
+
+client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+# --- Tools the agent can use ---
+def wiki_search(query):
+    facts = {"largest country by population": "India is the most populous country.",
+             "capital of India": "New Delhi is the capital of India."}
+    return facts.get(query.lower(), "No result found.")
+
+def calculator(expression):
+    try:
+        return str(eval(expression, {"__builtins__": {}}))
+    except Exception as e:
+        return f"Error: {e}"
+
+TOOLS = {"wiki_search": wiki_search, "calculator": calculator}
+SCHEMAS = [
+    {"name": "wiki_search", "description": "Look up a fact.",
+     "input_schema": {"type": "object",
+        "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+    {"name": "calculator", "description": "Evaluate a math expression.",
+     "input_schema": {"type": "object",
+        "properties": {"expression": {"type": "string"}}, "required": ["expression"]}},
+]
+
+def react(task, max_iters=6):
+    messages = [{"role": "user", "content": task}]
+    for i in range(max_iters):
+        resp = client.messages.create(
+            model="claude-opus-4-8", max_tokens=600,
+            tools=SCHEMAS, messages=messages,
+        )
+        # Log the agent's reasoning (Thought)
+        for b in resp.content:
+            if b.type == "text" and b.text.strip():
+                print(f"[Thought] {b.text.strip()}")
+        messages.append({"role": "assistant", "content": resp.content})
+
+        if resp.stop_reason != "tool_use":
+            final = "".join(b.text for b in resp.content if b.type == "text")
+            return final
+
+        results = []
+        for b in resp.content:
+            if b.type == "tool_use":
+                print(f"[Action] {b.name}({b.input})")
+                try:
+                    obs = TOOLS[b.name](**b.input)            # run tool
+                except Exception as e:
+                    obs = f"Tool error: {e}"                  # error -> observation
+                print(f"[Observation] {obs}")
+                results.append({"type": "tool_result",
+                                "tool_use_id": b.id, "content": obs})
+        messages.append({"role": "user", "content": results})
+    return "Reached max iterations without a final answer."
+
+print(react("What is the capital of the most populous country?"))
+
+# Expected trace:
+# [Thought] I need the most populous country first.
+# [Action] wiki_search({'query': 'largest country by population'})
+# [Observation] India is the most populous country.
+# [Thought] Now I need India's capital.
+# [Action] wiki_search({'query': 'capital of India'})
+# [Observation] New Delhi is the capital of India.
+# Final: The capital of the most populous country (India) is New Delhi.
+`} />
+
+The printed trace is the ReAct pattern made visible: the agent reasons (Thought), calls a tool (Action), reads the result (Observation), and reasons again — chaining two lookups to answer a question neither tool could answer alone. The `max_iters` guard and the try/except around tool calls are the safeguards that keep it robust. This is a complete agent in under 60 lines; the frameworks ahead add convenience, but this is the engine.
+
+<PaperLink
+  title="ReAct: Synergizing Reasoning and Acting in Language Models"
+  authors="Yao, Zhao, Yu, et al."
+  year={2022}
+  venue="ICLR"
+  url="https://arxiv.org/abs/2210.03629"
+/>
+
+<KeyTakeaways phase={5}>
+- **ReAct** interleaves **Reasoning (Thought)** and **Acting (Action)** with **Observation**, so each thought informs the next action and each observation informs the next thought.
+- The loop — **Thought → Action → Observation** — repeats until the model reasons it has enough to answer.
+- **Interleaving enables course-correction**: the model reasons fresh after each observation and adapts, unlike a fixed upfront plan; grounding in real results cuts hallucination.
+- ReAct beats **pure prompting** (ungrounded) and **pure acting** (unreasoned) on knowledge and decision tasks, and is more interpretable and controllable.
+- A ReAct **harness** needs a parser/dispatcher for actions, observation feedback, and safeguards — **max iterations** and **tool-error handling**.
+- ReAct is the **foundation of every agent framework** (`create_react_agent` and beyond); building it from scratch demystifies them all.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Why does interleaving reasoning and acting (ReAct) beat reasoning fully first, then acting?",
+    options: ["It is faster", "Each observation lets the model reason fresh and course-correct, instead of executing a fixed plan built on possibly-wrong assumptions", "It uses fewer tokens", "It removes the need for tools"],
+    correctIndex: 1,
+    explanation: "By alternating thought and action, ReAct lets the agent adjust based on real observations — noticing failures or wrong assumptions and adapting — which a plan built entirely upfront cannot do."
+  },
+  {
+    question: "What are the three repeating steps of the ReAct loop?",
+    options: ["Encode, decode, output", "Thought, Action, Observation", "Plan, execute, verify", "Retrieve, augment, generate"],
+    correctIndex: 1,
+    explanation: "ReAct cycles through Thought (reason about the next step), Action (call a tool), and Observation (the tool's result fed back), repeating until a final answer."
+  },
+  {
+    question: "Why are max-iteration limits and tool-error handling essential in a ReAct agent?",
+    options: ["To save money only", "To prevent infinite loops and to let the agent react to failures (feeding errors back as observations) rather than crashing", "To make it faster", "They are optional"],
+    correctIndex: 1,
+    explanation: "Agents can get stuck repeating a failing action, so a hard iteration cap is needed. Catching tool errors and feeding them back as observations lets the model adapt instead of the whole loop crashing."
+  }
+]} />
+
+## What's Next
+
+ReAct's "Action" step depends on the model reliably choosing a tool and its arguments. Modern models do this through a structured interface. In **Tool Use & Function Calling**, we study how function calling actually works — defining tools, parsing calls, parallel execution, and the security that real tool use demands.

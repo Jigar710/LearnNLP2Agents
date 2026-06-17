@@ -1,0 +1,190 @@
+---
+title: "Vector Databases & Retrieval Methods"
+subtitle: "Storing and searching millions of embeddings efficiently"
+phase: 4
+topicNumber: 35
+slug: "vector-databases-retrieval"
+readingTime: 16
+prerequisites: ["chunking-embedding"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('vector-databases-retrieval');
+
+<TopicHero topic={topic} />
+
+You have chunked your documents and embedded them into vectors. Now you need to store millions of those vectors and, for each query, find the most similar ones in *milliseconds*. Comparing a query against every stored vector — exact search — is too slow at scale, so the field developed **vector databases**: specialized systems built around approximate-nearest-neighbor algorithms that trade a tiny bit of accuracy for enormous speed. This topic covers how vector search works under the hood (the HNSW algorithm), the major vector databases (FAISS, Chroma, Qdrant, Pinecone, Weaviate), and the retrieval methods — dense, sparse, and hybrid — that determine what your system actually finds.
+
+These are the engineering foundations of production RAG. A great embedding model is wasted if you cannot search its vectors fast enough, and the choice of retrieval method often matters more than the choice of database.
+
+## What is a vector database?
+
+A **vector database** is a datastore optimized for one operation: given a query vector, find the stored vectors most similar to it. It indexes embeddings so that nearest-neighbor search is fast even over millions or billions of vectors, and it typically also stores the original text and metadata alongside each vector, supports filtering, and handles inserts, updates, and deletes. Where a traditional database indexes for exact key lookups, a vector database indexes for *similarity* search in high-dimensional space.
+
+## Approximate vs exact nearest neighbor
+
+The core challenge is that exact nearest-neighbor search — comparing the query to every vector — is `O(N)` per query, which is fine for thousands of vectors but hopeless for millions. **Approximate Nearest Neighbor (ANN)** search relaxes the requirement: instead of guaranteeing the *exact* closest vectors, it finds vectors that are *almost certainly* among the closest, far faster. For retrieval, this trade is almost always worth it — missing the 5th-best match occasionally is invisible to users, while sub-millisecond search over millions of vectors is transformative. ANN is what makes vector search practical at scale.
+
+## HNSW: the dominant algorithm
+
+The most widely-used ANN algorithm is **HNSW (Hierarchical Navigable Small World)**. It builds a multi-layer graph where each vector is a node connected to its near neighbors, with sparse long-range links in upper layers and dense local links in lower ones. Search starts at the top layer, greedily hops toward the query through the long-range links to get close fast, then descends to lower layers for fine-grained local search. The hierarchy gives logarithmic-ish search time while maintaining high recall. HNSW powers most modern vector databases because it offers an excellent balance of speed, accuracy, and the ability to insert new vectors incrementally.
+
+<Callout type="tip">
+HNSW's tunable parameters trade recall against speed and memory: more connections per node and a wider search beam raise recall but cost more. The defaults are usually good; tune only if benchmarking on your data shows you need to.
+</Callout>
+
+## The major vector databases
+
+- **FAISS** (Facebook AI Similarity Search): a library, not a server — extremely fast CPU/GPU similarity search you embed in your own code. Ideal for prototypes and when you control the infrastructure, but you manage persistence and scaling yourself.
+- **ChromaDB**: lightweight, embedded, developer-friendly. Great for prototypes and small-to-medium apps; runs in-process with minimal setup.
+- **Qdrant**: production-grade, Rust-based, with strong metadata filtering and good performance. A popular self-hosted choice for serious applications.
+- **Pinecone**: a fully-managed cloud vector database — no infrastructure to run, scales automatically. Convenient at the cost of a subscription and vendor dependence.
+- **Weaviate**: combines vector and keyword search with a graph-like data model and built-in modules.
+
+## Dense, sparse, and hybrid retrieval
+
+The *retrieval method* — how you score relevance — is as important as the database. **Dense retrieval** uses embedding similarity (cosine or dot product): great at semantic matching, capturing paraphrases and meaning. **Sparse retrieval** uses keyword methods like BM25 (Topic 5): great at exact term matching — names, codes, rare jargon — where the specific token matters. Each misses what the other catches. **Hybrid retrieval** runs both and *fuses* the results, commonly with **Reciprocal Rank Fusion (RRF)**, which combines the two ranked lists by summing reciprocal-rank scores. Hybrid retrieval reliably outperforms either method alone and is the production standard, because real queries need both semantic understanding and exact-match precision.
+
+## Metadata filtering
+
+A crucial capability is **metadata filtering**: restricting search to vectors matching structured criteria before or during the similarity search — only documents after a date, from a source, in a category, or belonging to a user. This sharpens relevance and, critically, enforces **access control**: in a multi-tenant system, filtering by user or organization ID ensures one customer never retrieves another's data. Filtering is where vector databases earn their keep over a bare similarity library; it is a frequent reason to choose Qdrant or Pinecone over raw FAISS.
+
+<ComparisonTable
+  phase={4}
+  headers={["System", "Type", "Best for", "Trade-off"]}
+  rows={[
+    ["FAISS", "Library (in-process)", "Prototypes, full control", "You manage persistence/scaling"],
+    ["ChromaDB", "Embedded DB", "Small-to-medium apps, dev speed", "Less suited to huge scale"],
+    ["Qdrant", "Self-hosted server", "Production, rich filtering", "You operate the server"],
+    ["Pinecone", "Managed cloud", "No-ops, automatic scaling", "Cost, vendor dependence"],
+    ["Weaviate", "Hybrid graph + vector", "Combined vector/keyword/graph", "More moving parts"],
+  ]}
+  caption="Vector stores span libraries, embedded DBs, self-hosted servers, and managed clouds."
+/>
+
+## Choosing a vector database
+
+The decision hinges on scale, operations appetite, cost, and features. For a prototype or full control, **FAISS** or **ChromaDB**. For production with filtering and self-hosting, **Qdrant** or **Weaviate**. For zero-ops managed scale, **Pinecone**. Consider how many vectors you will store, your latency targets, whether you need metadata filtering and access control, and whether you want to run infrastructure. Many teams start with Chroma or FAISS in development and migrate to a production database as they scale — the embeddings are portable, so switching is mostly an engineering exercise.
+
+## Index types beyond HNSW
+
+HNSW dominates, but it is not the only ANN index, and knowing the alternatives helps you reason about trade-offs. **Flat (brute-force)** indexes do exact search by comparing against every vector — slow at scale but perfectly accurate, and the right choice for small collections (a few thousand vectors) where the simplicity and exactness are worth it. **IVF (Inverted File)** indexes cluster the vectors and search only the clusters nearest the query, trading recall for speed; they use less memory than HNSW but generally retrieve a little worse at the same speed. **Product Quantization (PQ)** compresses vectors into compact codes so that billions fit in memory, at some accuracy cost, and is often combined with IVF (IVF-PQ) for massive-scale, memory-constrained deployments.
+
+The practical hierarchy is roughly: use a **flat** index for small data where exactness is cheap; use **HNSW** for most production cases, where it offers the best speed-recall balance and supports incremental inserts; and reach for **IVF-PQ** or similar compressed indexes only at billion-scale where memory becomes the binding constraint. FAISS exposes all of these as composable building blocks, which is part of why it remains the reference implementation even as higher-level databases wrap it. The index type is a knob most applications never need to touch — HNSW defaults are excellent — but when you hit a scale or memory wall, knowing that the index is a tunable choice, not a fixed cost, is what lets you push through it.
+
+## Scaling: persistence, sharding, and updates
+
+A library like FAISS gives you fast search but leaves the hard operational parts to you, and those parts are exactly what production vector databases provide. **Persistence**: an in-memory index must be saved to disk and reloaded, and incremental changes must survive restarts — a database handles this transparently. **Sharding and replication**: beyond a single machine's memory, vectors must be partitioned across nodes (sharding) for capacity and duplicated (replication) for availability and throughput, which a managed or server database orchestrates for you. **Updates and deletes**: real corpora change — documents are added, edited, removed — and the index must stay consistent without a full rebuild, which is non-trivial for graph indexes like HNSW.
+
+These operational concerns are usually the real reason teams graduate from a raw similarity library to a full vector database, more than raw search speed. A prototype with ten thousand static documents is happy with FAISS in a Python process. A production system with millions of documents that change daily, served to many concurrent users with access control, needs persistence, filtering, horizontal scaling, and consistent updates — and reinventing those on top of FAISS is a substantial engineering project. Recognizing where that line is for your application prevents two opposite mistakes: over-engineering a prototype with managed infrastructure it does not need, and under-engineering a production system on a library that cannot meet its operational demands. The embeddings are portable, so the migration is mostly mechanical, which means you can defer the decision until your scale actually requires it.
+
+## Distance metrics and normalization
+
+A detail that quietly causes bugs: the **distance metric** must match how your embeddings were produced. The common choices are **cosine similarity** (angle between vectors), **dot product** (inner product), and **Euclidean (L2) distance**. Most modern text embedders are trained so that cosine similarity reflects semantic similarity, and a standard trick is to **L2-normalize** all vectors to unit length, after which dot product and cosine similarity become equivalent — which is why the code in these topics normalizes embeddings and then uses inner-product search.
+
+Getting this wrong produces a system that retrieves nonsense without any error message. If you index with one metric and your embeddings assume another, the nearest-neighbor results will be subtly or wildly off, and because there is no crash, the failure is easy to miss — you just get poor answers and blame the model. So when you set up a vector index, confirm three things line up: how the embedding model was trained to be compared, whether you are normalizing vectors, and which metric the index uses. It is a small configuration detail with outsized consequences, and it belongs on the checklist for every RAG system you build, right alongside "use the same embedder for queries and documents." The most sophisticated retrieval pipeline collapses if the geometry it relies on is misconfigured at the base.
+
+## Code Example
+
+The code indexes vectors in FAISS, benchmarks query speed, and implements hybrid retrieval by fusing dense and BM25 rankings with Reciprocal Rank Fusion.
+
+<CodeBlock lang="python" filename="vector_search.py" code={`# vector_search.py
+# pip install faiss-cpu sentence-transformers rank-bm25 numpy
+import time
+import numpy as np
+import faiss
+from sentence_transformers import SentenceTransformer
+from rank_bm25 import BM25Okapi
+
+docs = [
+    "The API rate limit is 100 requests per minute.",
+    "Refunds are processed within 5 business days.",
+    "Use the X-API-Key header to authenticate requests.",
+    "Enterprise plans include a 99.9% uptime SLA.",
+    "Data is encrypted at rest with AES-256.",
+]
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
+vecs = embedder.encode(docs, normalize_embeddings=True).astype("float32")
+
+# --- Dense index with FAISS (HNSW) ---
+dim = vecs.shape[1]
+index = faiss.IndexHNSWFlat(dim, 32)     # 32 = graph connectivity
+index.add(vecs)
+
+query = "how do I authenticate to the API?"
+qv = embedder.encode([query], normalize_embeddings=True).astype("float32")
+
+t0 = time.time()
+dscore, didx = index.search(qv, k=len(docs))
+print(f"dense search took {1000*(time.time()-t0):.2f} ms")
+dense_rank = list(didx[0])
+
+# --- Sparse (BM25) ranking ---
+bm25 = BM25Okapi([d.lower().split() for d in docs])
+sparse_scores = bm25.get_scores(query.lower().split())
+sparse_rank = list(np.argsort(sparse_scores)[::-1])
+
+# --- Hybrid: Reciprocal Rank Fusion ---
+def rrf(rankings, k=60):
+    score = {}
+    for ranking in rankings:
+        for rank, doc_id in enumerate(ranking):
+            score[doc_id] = score.get(doc_id, 0) + 1 / (k + rank)
+    return sorted(score, key=score.get, reverse=True)
+
+hybrid = rrf([dense_rank, sparse_rank])
+print("dense top-1: ", docs[dense_rank[0]])
+print("sparse top-1:", docs[sparse_rank[0]])
+print("hybrid top-1:", docs[hybrid[0]])
+
+# Expected: all surface the authentication doc; hybrid is most robust.
+# dense search took ~0.20 ms
+# hybrid top-1: Use the X-API-Key header to authenticate requests.
+`} />
+
+The HNSW index returns results in a fraction of a millisecond — fast enough for real-time RAG over far larger collections. The hybrid section shows why production systems fuse methods: dense retrieval matches "authenticate" semantically, BM25 catches the exact term "API", and RRF combines their rankings so the right document wins even when one method alone might rank it lower. This dense-plus-sparse-with-fusion recipe is the workhorse of serious retrieval systems, and it costs little to add once you already have an embedding index in place.
+
+<KeyTakeaways phase={4}>
+- A **vector database** indexes embeddings for fast similarity search and stores text and metadata alongside them, supporting filtering and updates.
+- **Exact** nearest-neighbor search is O(N) and too slow at scale; **Approximate Nearest Neighbor (ANN)** trades a little accuracy for huge speed.
+- **HNSW** is the dominant ANN algorithm — a navigable multi-layer graph giving fast, high-recall search with incremental inserts.
+- Options span a **library (FAISS)**, **embedded DB (Chroma)**, **self-hosted servers (Qdrant, Weaviate)**, and **managed cloud (Pinecone)**.
+- **Dense** retrieval matches meaning, **sparse** (BM25) matches exact terms; **hybrid** retrieval fuses both (e.g. **RRF**) and is the production standard.
+- **Metadata filtering** sharpens relevance and enforces access control — a key reason to use a real vector database over a bare similarity library.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What is the difference between ANN and exact nearest-neighbor search?",
+    options: ["ANN is always exact", "Exact compares the query to every vector (O(N)); ANN finds almost-certainly-closest vectors far faster by trading a little accuracy", "ANN uses no index", "They are the same"],
+    correctIndex: 1,
+    explanation: "Exact search is O(N) per query and too slow at scale. Approximate Nearest Neighbor methods like HNSW relax exactness to achieve sub-millisecond search over millions of vectors, missing the true closest only rarely."
+  },
+  {
+    question: "Why does hybrid retrieval usually outperform dense or sparse alone?",
+    options: ["It uses a bigger model", "Dense captures semantic/paraphrase matches while sparse (BM25) catches exact terms like names and codes; fusing both covers each other's gaps", "It removes the embedding step", "It only works on small corpora"],
+    correctIndex: 1,
+    explanation: "Dense embedding retrieval matches meaning but can miss exact rare terms; keyword BM25 catches those but misses paraphrases. Hybrid retrieval (e.g. via RRF) combines their rankings, so the right document surfaces in more cases."
+  },
+  {
+    question: "Beyond similarity search, what key capability does metadata filtering provide?",
+    options: ["Faster embeddings", "Restricting retrieval to matching records — enabling relevance refinement and access control (e.g. per-user data isolation)", "Smaller vectors", "Better tokenization"],
+    correctIndex: 1,
+    explanation: "Filtering by structured metadata (date, source, user) sharpens results and, crucially, enforces access control in multi-tenant systems so users only retrieve data they are allowed to see."
+  }
+]} />
+
+## What's Next
+
+Naive RAG — embed, retrieve top-k, generate — often retrieves the wrong or noisy chunks. In **Advanced RAG — Re-ranking, HyDE & Query Expansion**, we fix retrieval's failure modes with smarter strategies that dramatically improve which documents reach the model.

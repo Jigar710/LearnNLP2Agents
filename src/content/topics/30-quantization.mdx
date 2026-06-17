@@ -1,0 +1,180 @@
+---
+title: "Quantization — INT8, INT4, GGUF & AWQ"
+subtitle: "Shrinking LLMs to run on consumer hardware without losing quality"
+phase: 3
+topicNumber: 30
+slug: "quantization"
+readingTime: 15
+prerequisites: ["lora-qlora"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('quantization');
+
+<TopicHero topic={topic} />
+
+A 7-billion-parameter model in full 32-bit precision needs about 28 GB just to hold its weights — more than most GPUs have, and far more than a laptop. **Quantization** is the technique that shrinks models by storing their weights in fewer bits, turning a 28 GB model into a 4 GB one that runs on a MacBook. It is the single most important method for making large models practical to deploy outside data centers, and you already met it powering QLoRA. This topic covers quantization properly: what it is, the trade-offs between precision levels, the major methods (LLM.int8, GPTQ, AWQ, GGUF), and how to run a quantized model in practice.
+
+The remarkable thing about quantization is how *little* quality you lose for how *much* memory you save. A well-quantized 4-bit model is often nearly indistinguishable from its 16-bit original, which is why quantized models dominate local and cost-sensitive deployment.
+
+## What is quantization?
+
+A neural network's weights are normally stored as 32-bit or 16-bit floating-point numbers. Quantization maps these high-precision values to a smaller set of low-precision values — 8-bit integers, 4-bit integers, or specialized formats — using far fewer bits per weight. The mapping records a scale (and sometimes a zero-point) per group of weights, so the low-bit integers can be converted back to approximate floats when needed. The result is a model that takes a fraction of the memory and, often, runs faster because moving fewer bytes from memory is the main bottleneck in LLM inference.
+
+The memory math is direct: going from 32-bit to 8-bit is a 4× reduction; to 4-bit, an 8× reduction. A 7B model drops from ~28 GB (FP32) to ~14 GB (FP16) to ~7 GB (INT8) to ~4 GB (INT4). That last figure is what lets a 7B model run on consumer hardware.
+
+## Why quantize?
+
+Three reasons. **Memory**: quantization is often the difference between a model fitting on your hardware and not. **Speed**: LLM inference is usually *memory-bandwidth bound* — the GPU spends most of its time reading weights from memory, not computing — so halving the bytes per weight can nearly double throughput. **Cost**: smaller models run on cheaper hardware and serve more requests per dollar. The trade is a small, usually acceptable, loss of accuracy.
+
+<Callout type="tip">
+Inference is dominated by memory movement, not arithmetic. This is why quantization often speeds up generation even though the math is 'the same' — you are simply shuttling far fewer bytes between memory and compute units per token.
+</Callout>
+
+## PTQ vs QAT
+
+There are two broad approaches. **Post-Training Quantization (PTQ)** quantizes an already-trained model with no further training — fast, cheap, and the common case. **Quantization-Aware Training (QAT)** simulates quantization *during* training so the model learns to be robust to it, yielding better low-bit accuracy at the cost of a full training run. Most LLM quantization is PTQ, because retraining a huge model is expensive; the cleverness of methods like GPTQ and AWQ is getting near-QAT quality from a PTQ procedure.
+
+## The major methods
+
+- **LLM.int8()** (Dettmers 2022): 8-bit quantization that handles "outlier" features — a few dimensions with large values that, if naively quantized, wreck accuracy — by keeping them in higher precision. Near-lossless 8-bit inference.
+- **GPTQ**: a PTQ method that quantizes weights one layer at a time using second-order (Hessian) information to minimize the error introduced, achieving strong 4-bit accuracy.
+- **AWQ (Activation-aware Weight Quantization)**: protects the small fraction of *salient* weights (identified by their activations) that matter most for quality, quantizing the rest aggressively. Fast and high-quality at 4-bit.
+- **GGUF/GGML**: a file format and quantization scheme designed for *CPU* and mixed CPU-GPU inference, used by `llama.cpp`. It made running LLMs on laptops and phones practical.
+
+## GGUF quant levels and the quality-size trade
+
+GGUF offers a menu of quantization levels with names like `Q4_K_M`, `Q5_K_M`, and `Q8_0`. The number is the bit-width, and the suffixes denote the scheme and size variant. Higher bits mean better quality and bigger files; lower bits mean smaller and faster but more degradation. `Q4_K_M` (a 4-bit "medium" variant) is a popular sweet spot — it uses a smarter mixed scheme that keeps important weights at higher precision, giving better quality than the older flat `Q4_0` at nearly the same size. The practical advice for local models: start around `Q4_K_M` or `Q5_K_M`, and only go lower if memory forces you to.
+
+## Perplexity degradation
+
+How much quality do you lose? Measured by perplexity (Topic 20), the degradation is small and predictable. 8-bit quantization is essentially lossless. 4-bit with a good method (GPTQ, AWQ, `Q4_K_M`) typically raises perplexity only slightly — often imperceptible in practice. Below 4-bit (3-bit, 2-bit), degradation accelerates and becomes noticeable. Larger models tolerate quantization *better* than small ones — a quantized 70B model loses less relative quality than a quantized 7B — because their redundancy absorbs the noise. This is why aggressive quantization is most attractive for big models.
+
+<ComparisonTable
+  phase={3}
+  headers={["Precision", "7B model size", "Relative speed", "Quality"]}
+  rows={[
+    ["FP32", "~28 GB", "Baseline", "Reference"],
+    ["FP16 / BF16", "~14 GB", "Faster", "Effectively identical"],
+    ["INT8 (LLM.int8)", "~7 GB", "Faster", "Near-lossless"],
+    ["INT4 (GPTQ/AWQ)", "~4 GB", "Fast", "Slight degradation"],
+    ["GGUF Q4_K_M", "~4 GB", "Fast (CPU-friendly)", "Good — popular sweet spot"],
+    ["INT3 / INT2", "~3 GB / ~2 GB", "Fastest", "Noticeable degradation"],
+  ]}
+  caption="Precision vs size, speed, and quality for a 7B model (approximate)."
+/>
+
+## Weights, activations, and KV cache
+
+Quantization can target three different things, and distinguishing them clarifies a lot. **Weight quantization** compresses the model's stored parameters and is the most common kind — it shrinks the file and, because weights dominate memory traffic, speeds inference. **Activation quantization** compresses the intermediate tensors that flow through the network during a forward pass; it is harder because activations vary with the input and can contain large outliers, which is exactly the problem LLM.int8 solves by keeping outlier dimensions in higher precision. **KV-cache quantization** compresses the cached keys and values from past tokens (Topic 16); since the KV cache grows with context length and can dominate memory for long sequences, quantizing it to 8-bit or 4-bit is increasingly important for long-context serving.
+
+Many schemes are **weight-only**: they quantize the stored weights but dequantize them to 16-bit on the fly to do the actual matrix multiplications in higher precision. This captures most of the memory and bandwidth benefit while sidestepping the accuracy hazards of low-precision arithmetic. Other schemes quantize both weights and activations to do genuinely low-precision compute, which is faster still but trickier to keep accurate. Knowing which parts a given method quantizes — weights only, weights and activations, the KV cache — tells you both where its speed comes from and where its accuracy risks lie, and it explains why two "4-bit" methods can behave quite differently.
+
+## Calibration, outliers, and why some methods need data
+
+A subtle but important distinction: some quantization methods are **data-free**, mapping weights to low precision using only the weights themselves, while others require a small **calibration dataset**. GPTQ and AWQ are calibration-based — they run a few hundred representative examples through the model to measure which weights and activations matter most, then quantize so as to minimize error on what actually flows through the network. This is why a GPTQ or AWQ model is quantized *for* a rough domain: the calibration data shapes the result, and badly chosen calibration data can hurt quality on dissimilar inputs.
+
+The reason calibration helps so much is **outliers**. Real activations in large language models contain a few dimensions with disproportionately large magnitudes, and these outlier features carry a lot of the model's signal. Naive uniform quantization wastes most of its limited range trying to represent the rare huge values, crushing the precision available for the common small ones — and accuracy collapses. Every successful low-bit method is, at heart, a different answer to the outlier problem: LLM.int8 isolates outlier dimensions into a high-precision path, AWQ identifies and protects the salient weights tied to them, GPTQ compensates for quantization error using second-order information, and NF4 uses a value distribution matched to the bell-curve shape of neural weights. Seeing outliers as the common enemy turns a confusing list of method names into a coherent story: they are all managing the same fundamental tension between a tiny bit budget and a few very important large numbers.
+
+## Choosing a quantization for your use case
+
+With the landscape in view, the practical decision becomes tractable. If you are serving on **GPU** and want maximum quality at 4-bit, GPTQ or AWQ are strong choices, with AWQ often faster and GPTQ widely supported. If you are running on **CPU, a laptop, or mixed CPU-GPU**, GGUF with `llama.cpp` is the ecosystem to use, and `Q4_K_M` or `Q5_K_M` are sensible defaults. If you are **fine-tuning** rather than only serving, QLoRA's 4-bit NF4 base is the standard. And if quality is paramount and memory is ample, **8-bit** is essentially free quality-wise and a safe conservative choice.
+
+Two meta-principles tie it together. First, **always evaluate the quantized model on your own task**, because quantization's quality impact is task-dependent and a level that is imperceptible on chit-chat may matter for precise reasoning or code. Second, **prefer a larger model at lower precision over a smaller model at higher precision** when the memory budget is fixed: a 13B model at 4-bit usually beats a 7B model at 8-bit despite similar memory, because parameters bought more than precision did, and larger models absorb quantization noise better. This "quantize a bigger model" heuristic is one of the most useful rules of thumb in practical LLM deployment, and it follows directly from the facts that inference is memory-bound and that bigger models are more quantization-tolerant. Quantization, in the end, is not a niche optimization but a core deployment decision that interacts with model choice, hardware, and task — and getting it right is often what determines whether a capable model is affordable to run at all.
+
+## How quantization went mainstream
+
+Quantization is old in deep learning — compressing networks for mobile and embedded devices predates large language models by years — but its rise to centrality for LLMs is recent and instructive. The turning point was the realization that the *outlier* problem, not low precision itself, was what broke naive quantization of large Transformers. Once LLM.int8 showed in 2022 that outlier-aware 8-bit could be near-lossless, and GPTQ and the GGUF ecosystem followed with practical 4-bit, running big models on modest hardware went from impossible to routine within about a year.
+
+This rapid maturation coincided with the open-weights boom, and the two reinforced each other. Open models gave the community something to quantize; quantization made those models runnable by people without data centers; and that accessibility drove a flood of tooling, formats, and shared quantized checkpoints. Today, downloading a capable model in a 4-bit GGUF or AWQ format and running it locally is a few minutes of work. The lesson is that an enabling technique can be as transformative as a new model: quantization did not make models smarter, but by making them *runnable*, it put frontier-adjacent capability into far more hands, which is its own kind of progress and a fitting close to a phase about taming the costs of scale.
+
+## Code Example
+
+The code loads a model in 8-bit and then 4-bit using BitsAndBytes and reports the memory footprint, showing the dramatic shrink and how little code it takes.
+
+<CodeBlock lang="python" filename="quantize_inference.py" code={`# quantize_inference.py
+# pip install transformers bitsandbytes accelerate torch
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+name = "meta-llama/Llama-3.1-8B"
+tok = AutoTokenizer.from_pretrained(name)
+
+def footprint_gb(model):
+    return model.get_memory_footprint() / 1e9
+
+# --- 8-bit (LLM.int8) ---
+m8 = AutoModelForCausalLM.from_pretrained(
+    name, quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+    device_map="auto",
+)
+print(f"8-bit footprint: {footprint_gb(m8):.1f} GB")
+
+# --- 4-bit (NF4) ---
+m4 = AutoModelForCausalLM.from_pretrained(
+    name,
+    quantization_config=BitsAndBytesConfig(
+        load_in_4bit=True, bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+    ),
+    device_map="auto",
+)
+print(f"4-bit footprint: {footprint_gb(m4):.1f} GB")
+
+# Generation works exactly as with a full-precision model
+ids = tok("Quantization lets large models", return_tensors="pt").to(m4.device)
+out = m4.generate(**ids, max_new_tokens=20)
+print(tok.decode(out[0], skip_special_tokens=True))
+
+# Expected (approx):
+# 8-bit footprint: ~8.0 GB
+# 4-bit footprint: ~5.0 GB
+# Quantization lets large models run on consumer hardware ...
+`} />
+
+Two lines of config turn an 8-billion-parameter model from a 16 GB monster into a ~5 GB model that fits comfortably on a single consumer GPU, and generation works identically — the quantization is transparent to the rest of your code. For CPU or laptop deployment you would instead use a GGUF file with `llama-cpp-python`, choosing a level like `Q4_K_M`. Either way, quantization is what carries the large models of this phase out of the data center and onto everyday hardware, setting up the inference-optimization techniques of Phase 4.
+
+<KeyTakeaways phase={3}>
+- **Quantization** stores weights in fewer bits (INT8, INT4, specialized formats), cutting memory ~4× (8-bit) to ~8× (4-bit) and often speeding inference.
+- Inference is **memory-bandwidth bound**, so fewer bytes per weight means faster generation, not just smaller files.
+- **PTQ** quantizes a trained model cheaply (the common case); **QAT** trains for robustness at higher cost. Good PTQ methods approach QAT quality.
+- Key methods: **LLM.int8** (outlier-aware, near-lossless 8-bit), **GPTQ** (Hessian-based 4-bit), **AWQ** (protect salient weights), **GGUF** (CPU-friendly, `llama.cpp`).
+- **GGUF levels** like `Q4_K_M` balance size and quality; 8-bit is near-lossless, 4-bit slightly degraded, below 4-bit noticeably worse.
+- **Larger models tolerate quantization better**; two lines of config shrink an 8B model to a few GB with quality nearly intact.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Why is Q4_K_M often preferred over the older Q4_0 in GGUF?",
+    options: ["It is larger and slower", "It uses a smarter mixed scheme that keeps important weights at higher precision, giving better quality at nearly the same size", "It is 8-bit", "It needs no scale factor"],
+    correctIndex: 1,
+    explanation: "Q4_K_M is a 4-bit 'K-quant medium' variant that allocates more precision to important weights, yielding better quality than the flat Q4_0 scheme while keeping a similar file size."
+  },
+  {
+    question: "Why does quantization often speed up inference, not just save memory?",
+    options: ["It reduces the number of layers", "LLM inference is memory-bandwidth bound, so moving fewer bytes per weight increases throughput", "It removes attention", "It uses a smaller vocabulary"],
+    correctIndex: 1,
+    explanation: "Generation spends most time reading weights from memory rather than doing arithmetic. Fewer bits per weight means less data to move, so quantization speeds up token generation."
+  },
+  {
+    question: "How does model size affect tolerance to quantization?",
+    options: ["Smaller models tolerate it better", "Larger models tolerate quantization better — their redundancy absorbs the precision loss", "Size has no effect", "Only 7B models can be quantized"],
+    correctIndex: 1,
+    explanation: "Larger models have more redundancy, so they lose less relative quality when quantized. A quantized 70B model degrades less than a quantized 7B, making aggressive quantization most attractive for big models."
+  }
+]} />
+
+## What's Next
+
+You have completed Phase 3: how large language models are pre-trained, scaled, aligned, fine-tuned, and compressed. Phase 4 turns to *using* them well. In **Prompt Engineering — Zero-shot, Few-shot & CoT**, we start the applied journey with the skill of talking to LLMs effectively to get the behaviour you want.

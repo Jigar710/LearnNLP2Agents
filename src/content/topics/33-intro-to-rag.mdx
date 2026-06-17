@@ -1,0 +1,183 @@
+---
+title: "Introduction to RAG"
+subtitle: "Giving LLMs access to your own knowledge base at inference time"
+phase: 4
+topicNumber: 33
+slug: "intro-to-rag"
+readingTime: 14
+prerequisites: ["prompt-engineering"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: true
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import DiagramWrapper from '../../components/topic/DiagramWrapper.astro';
+import RagPipeline from '../../components/diagrams/RagPipeline.tsx';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('intro-to-rag');
+
+<TopicHero topic={topic} />
+
+A language model knows only what it learned during training. Ask it about your company's internal documents, last week's news, or a private database, and it cannot help — that knowledge was never in its weights, and it may confidently hallucinate an answer instead. **Retrieval-Augmented Generation (RAG)** solves this by giving the model relevant information *at inference time*: retrieve documents related to the query, insert them into the prompt, and let the model generate an answer grounded in them. RAG is the single most important pattern for building LLM applications over private or current knowledge, and it powers most production question-answering systems.
+
+This topic builds RAG from first principles: why LLM knowledge is limited, how the retrieve-augment-generate pipeline works, when to use RAG versus fine-tuning, and how it reduces hallucination. An interactive diagram animates the pipeline, and the code builds a complete RAG system from scratch with FAISS.
+
+## The LLM knowledge problem
+
+A pre-trained model's knowledge has two hard limits. It is **frozen** at training time — it knows nothing that happened after its training cutoff. And it is **public** — it never saw your private documents, internal wikis, or proprietary data. Worse, when asked about something it does not know, an LLM does not reliably say "I don't know"; it often *hallucinates* a plausible-sounding but false answer, because its objective is to produce likely text, not to be truthful. For any application over current events or private knowledge, the raw model is both ignorant and dangerously confident.
+
+## The RAG idea
+
+RAG's insight is to separate *knowledge* from *reasoning*. LLMs are excellent at reading and writing but poor at memorizing exhaustive facts. So instead of expecting the model to *know* everything, you store knowledge in an external, searchable database and *retrieve* the relevant pieces when needed, handing them to the model as context. The model then does what it is good at — reading the provided text and composing a grounded answer. The knowledge lives outside the model and can be updated instantly; the model supplies the language understanding.
+
+## The RAG pipeline
+
+Naive RAG is a clean four-step pipeline: **Query → Retrieve → Augment → Generate.** The user's query is used to search a knowledge base for relevant documents (retrieve); the top results are inserted into the prompt alongside the query (augment); and the model generates an answer using that context (generate). Concretely, this requires an *indexing* phase done ahead of time — split documents into chunks, embed each chunk into a vector, and store the vectors — and a *query* phase at runtime — embed the query, find the nearest chunks by vector similarity, and prompt the model with them.
+
+<DiagramWrapper title="The RAG pipeline" caption="Press Play to watch a query flow through retrieval and generation; click any stage for details.">
+  <RagPipeline client:visible />
+</DiagramWrapper>
+
+## Why RAG works
+
+RAG works because it plays to the model's strengths and covers its weaknesses. LLMs are strong **readers and writers** but unreliable **memorizers** — they compress vast knowledge lossily and cannot recall specifics verbatim. By supplying the exact relevant text in the prompt, RAG turns a recall problem into a reading-comprehension problem, which the model handles well. It also makes the system's knowledge **transparent and updatable**: you can see which documents informed an answer, and you update knowledge by changing the database, not retraining the model.
+
+## RAG vs fine-tuning
+
+A common question: to teach a model about your data, should you use RAG or fine-tune? They solve different problems. **RAG** injects *knowledge* — facts the model should look up — and excels when information is large, changes often, or must be cited. **Fine-tuning** teaches *behaviour, style, or skills* — how the model should respond — and is better for adapting tone, format, or task patterns. As a rule: use RAG for knowledge ("what does our policy say about refunds?"), fine-tuning for behaviour ("always respond in our brand voice"). They are complementary and often combined.
+
+<Callout type="tip">
+The mnemonic: RAG for knowledge, fine-tuning for behaviour. If the answer changes when your documents change, you want RAG. If you are shaping how the model talks or what task it performs, you want fine-tuning.
+</Callout>
+
+## RAG components and hallucination reduction
+
+A RAG system has four parts: a **document store** (the chunked, indexed knowledge), an **embedder** (turns text into vectors), a **retriever** (finds relevant chunks for a query), and a **generator** (the LLM that writes the answer). Each is a topic of its own in this phase — chunking and embedding (Topic 34), vector databases and retrieval (Topic 35), advanced retrieval (Topic 36).
+
+RAG **reduces hallucination** by grounding answers in retrieved evidence: when the model has the relevant facts in its prompt, it is far less likely to invent them. But RAG does not *eliminate* hallucination — the model can still misread the context, combine facts wrongly, or answer beyond what the retrieved text supports. Good systems instruct the model to answer *only* from the provided context and to say "I don't know" when the context is insufficient.
+
+## RAG evaluation basics
+
+Evaluating RAG means judging both retrieval and generation. Two core dimensions: **faithfulness** (does the answer stay true to the retrieved context, or does it hallucinate?) and **relevance** (did retrieval surface the right documents, and does the answer address the query?). We cover formal RAG evaluation, including the RAGAS framework, in Topic 37 — but keep these two questions in mind from the start, because a RAG system can fail at retrieval (good model, wrong documents) or at generation (right documents, bad answer), and the fixes differ.
+
+## How retrieval actually finds relevant text
+
+The heart of RAG is retrieval, and it is worth understanding the two ways it works, because they catch different things. **Dense retrieval** — the embedding approach used in the code below — represents both the query and each document chunk as vectors in a semantic space (Topic 6) and finds chunks whose vectors are closest to the query's. Its great strength is capturing *meaning*: a query about "how to get my money back" can match a document about "refund policy" even though they share no words, because their embeddings are near each other. This semantic matching is what makes embedding-based retrieval feel almost magical.
+
+**Sparse retrieval** — keyword methods like BM25 (Topic 5) — instead matches on exact terms, scoring documents by how many query words they contain, weighted by rarity. It excels precisely where dense retrieval can stumble: exact names, product codes, rare technical terms, and acronyms, where the specific token matters more than the gist. The two are complementary, and the best production systems often combine them (hybrid retrieval, Topic 35), because dense retrieval catches paraphrases while sparse retrieval guarantees that an exact, important keyword is not missed. For your first RAG system, dense retrieval alone is usually enough and is what we build here, but knowing that retrieval is not a single monolithic thing — that it has a semantic flavour and a lexical flavour, each with characteristic strengths — is what lets you diagnose why a relevant document failed to surface.
+
+## RAG versus stuffing everything into a long context
+
+A reasonable question in the era of long-context models: if a model can read 100,000 or a million tokens, why retrieve at all — why not just put *all* your documents in the prompt? Sometimes you can and should, for a small enough corpus. But RAG remains essential for several reasons. **Cost and latency** scale with context length, so stuffing a huge corpus into every request is slow and expensive when a few relevant chunks would do. **Quality** can actually *degrade* with very long contexts — the "lost in the middle" effect means a model may overlook the one relevant passage buried among thousands of irrelevant ones, whereas retrieval surfaces it to a prominent position. And **scale**: many knowledge bases are far larger than any context window, so you simply cannot fit them.
+
+The right way to see it is that long context and retrieval are *complementary*, not competing. Longer contexts let you retrieve *more* chunks and reason over them together, raising the ceiling on RAG quality. But retrieval is what makes the system focus on what matters, controls cost, and scales beyond the window. Even as context windows grow, "retrieve the relevant material, then reason over it" stays the efficient and reliable architecture, because feeding a model only what it needs is almost always better than feeding it everything and hoping it finds the needle.
+
+## The failure modes of naive RAG
+
+It is important to set expectations honestly: the simple pipeline in this topic works, but it fails in predictable ways that the next topics exist to fix. **Retrieval can miss** — the right chunk exists but the query's embedding does not land near it, perhaps because the question is phrased very differently from the document, so the model never sees the answer and either says "I don't know" or hallucinates. **Retrieval can be noisy** — irrelevant chunks crowd out the relevant one within the top-k, distracting the model. **Chunking can fragment** — a fact split across two chunks may have neither chunk contain the whole answer. And **generation can drift** — even with the right context, the model may add unsupported details.
+
+Each failure mode has a remedy you will learn: better chunking and embedding (Topic 34) to make relevant text findable, stronger retrieval and re-ranking (Topics 35 and 36) to surface and prioritize the right chunks, and careful grounding prompts plus evaluation (Topic 37) to keep generation faithful. Seeing naive RAG as a *starting point* with known weaknesses, rather than a finished solution, is the right frame. It is genuinely useful out of the box — many production systems are little more than this pipeline done carefully — but knowing where it breaks tells you exactly which of the upcoming techniques to reach for when your own RAG system disappoints. The rest of this phase is, in large part, a systematic tour of fixing each of these failure modes.
+
+## Code Example
+
+The code builds a complete, minimal RAG pipeline from scratch: embed a small corpus with sentence-transformers, index it in FAISS, retrieve the top chunks for a query, and generate a grounded answer with a current Claude model.
+
+<CodeBlock lang="python" filename="rag_from_scratch.py" code={`# rag_from_scratch.py
+# pip install sentence-transformers faiss-cpu anthropic
+import os
+import faiss
+import numpy as np
+from sentence_transformers import SentenceTransformer
+from anthropic import Anthropic
+
+# --- INDEXING (done once, ahead of time) ---
+docs = [
+    "Our refund policy allows returns within 30 days of purchase.",
+    "Premium support is available 24/7 for enterprise customers.",
+    "The API rate limit is 100 requests per minute on the free tier.",
+    "Data is encrypted at rest using AES-256.",
+]
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
+doc_vecs = embedder.encode(docs, normalize_embeddings=True)
+index = faiss.IndexFlatIP(doc_vecs.shape[1])   # inner product = cosine (normalized)
+index.add(np.asarray(doc_vecs, dtype="float32"))
+
+# --- QUERY (at runtime) ---
+def retrieve(query, k=2):
+    q = embedder.encode([query], normalize_embeddings=True).astype("float32")
+    scores, idx = index.search(q, k)
+    return [docs[i] for i in idx[0]]
+
+query = "How long do I have to return something?"
+context = retrieve(query)
+print("retrieved:", context)
+
+# --- GENERATE grounded answer ---
+client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+prompt = (
+    "Answer the question using ONLY the context below. "
+    "If the context does not contain the answer, say 'I don't know.'\\n\\n"
+    f"Context:\\n- " + "\\n- ".join(context) + f"\\n\\nQuestion: {query}"
+)
+msg = client.messages.create(
+    model="claude-opus-4-8", max_tokens=200,
+    messages=[{"role": "user", "content": prompt}],
+)
+print("\\nanswer:", msg.content[0].text)
+
+# Expected:
+# retrieved: ['Our refund policy allows returns within 30 days of purchase.', ...]
+# answer: You have 30 days from the date of purchase to return an item.
+`} />
+
+This is RAG in 30 lines. The indexing phase embeds and stores the corpus; the query phase embeds the question, retrieves the two most similar chunks by cosine similarity, and prompts the model to answer *only* from them. Notice the grounding instruction — "use ONLY the context" and "say I don't know" — which is what keeps the model honest. The retrieved chunk about refunds directly answers the question, and the model composes a clean response from it. Every production RAG system, no matter how sophisticated, is an elaboration of these three steps.
+
+<PaperLink
+  title="Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks"
+  authors="Lewis, Perez, Piktus, et al."
+  year={2020}
+  venue="NeurIPS"
+  url="https://arxiv.org/abs/2005.11401"
+/>
+
+<KeyTakeaways phase={4}>
+- An LLM's knowledge is **frozen and public**; it cannot answer from current or private data and may **hallucinate** confidently.
+- **RAG** separates knowledge from reasoning: store knowledge externally, **retrieve** relevant pieces at query time, and let the model read and answer from them.
+- The pipeline is **Query → Retrieve → Augment → Generate**, with an offline indexing phase (chunk, embed, store) and a runtime query phase.
+- **RAG for knowledge, fine-tuning for behaviour** — use RAG when facts are large, changing, or must be cited; combine them when useful.
+- RAG's four components are a **document store, embedder, retriever, and generator**; it **reduces but does not eliminate** hallucination — instruct the model to answer only from context.
+- Evaluate both **retrieval** (right documents) and **generation** (faithful, relevant answer); failures at each have different fixes.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "When would you choose RAG over fine-tuning?",
+    options: ["To change the model's tone", "When the model needs access to large, changing, or private knowledge that must be looked up (and ideally cited)", "To make the model smaller", "Never — they are the same"],
+    correctIndex: 1,
+    explanation: "RAG injects knowledge that can change and be cited, ideal for facts and documents. Fine-tuning shapes behaviour and style. Rule of thumb: RAG for knowledge, fine-tuning for behaviour."
+  },
+  {
+    question: "What are the four steps of the naive RAG pipeline?",
+    options: ["Train, validate, test, deploy", "Query, Retrieve, Augment, Generate", "Tokenize, embed, attend, decode", "Index, prune, quantize, serve"],
+    correctIndex: 1,
+    explanation: "RAG embeds the query, retrieves relevant chunks from a knowledge base, augments the prompt with them, and generates an answer grounded in that context."
+  },
+  {
+    question: "Does RAG eliminate hallucination?",
+    options: ["Yes, completely", "No — it reduces hallucination by grounding answers in retrieved evidence, but the model can still misread or over-reach", "Only for math", "It increases hallucination"],
+    correctIndex: 1,
+    explanation: "Grounding in retrieved facts makes hallucination far less likely, but the model can still misinterpret context or answer beyond what it supports. Instructing it to answer only from context and admit uncertainty helps."
+  }
+]} />
+
+## What's Next
+
+RAG's quality is decided long before the model runs — by *how you split and represent your documents*. In **Chunking & Embedding Strategies**, we study the chunking and embedding choices that determine what your retriever can find, and why they make or break a RAG system.

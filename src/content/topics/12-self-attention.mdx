@@ -1,0 +1,209 @@
+---
+title: "Scaled Dot-Product Self-Attention"
+subtitle: "Every token attending to every other token simultaneously"
+phase: 2
+topicNumber: 12
+slug: "self-attention"
+readingTime: 16
+prerequisites: ["attention-mechanism"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: true
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+import DiagramWrapper from '../../components/topic/DiagramWrapper.astro';
+import AttentionHeatmap from '../../components/diagrams/AttentionHeatmap.tsx';
+
+export const topic = getTopicBySlug('self-attention');
+
+<TopicHero topic={topic} />
+
+In the last topic, attention let a decoder look back at an encoder. Self-attention takes the same mechanism and points it *inward*: every token in a single sequence attends to every other token in that same sequence, including itself. This one change — attention with no recurrence, applied within a sequence — is the operation at the heart of the Transformer and therefore of every large language model. Master scaled dot-product self-attention and you have mastered the single most important computation in modern AI.
+
+This topic builds the operation from the ground up. We will introduce the query/key/value framing, see how all three are linear projections of the *same* input, derive the scaled dot-product formula term by term, explain the mysterious `1/√d_k` scaling factor, and reason about the quadratic cost that makes long context expensive. An interactive heatmap lets you watch a sentence attend to itself, and a from-scratch PyTorch implementation removes any remaining magic.
+
+## From cross-attention to self-attention
+
+Bahdanau attention is *cross*-attention: the query comes from one sequence (the decoder) and the keys and values from another (the encoder). The decoder attends, but the encoder still builds its representations with a recurrent network, processing one token at a time and struggling to relate distant words.
+
+Self-attention asks a bolder question. What if a token could directly gather information from *every other token in its own sequence*, in a single step, regardless of distance? In "The animal didn't cross the street because it was too tired," resolving "it" requires linking it to "animal" seven words back. A recurrent network must carry that information through seven steps, leaking it along the way. Self-attention lets "it" attend straight to "animal" with a single, direct connection. Every pair of tokens is one hop apart, which is why self-attention captures long-range dependencies so much better than recurrence.
+
+## Query, Key, Value
+
+The query/key/value framing from the previous topic now does real work. For self-attention, each token produces all three roles from itself:
+
+- The **query** asks, "what information am I looking for?"
+- The **key** advertises, "this is what I contain," and is matched against queries.
+- The **value** is the actual content that gets passed along once a match is found.
+
+Every token computes a query, a key, and a value. To decide how much token A should attend to token B, you compare A's query with B's key. The stronger the match, the more of B's value flows into A's new representation. Because every token does this against every other token, the output is a set of representations in which each token has absorbed context from the whole sequence.
+
+## QKV are projections of the same input
+
+Where do queries, keys, and values come from? They are **learned linear projections of the same input embeddings.** Given an input matrix `X` (one row per token), three weight matrices produce them: `Q = X W_Q`, `K = X W_K`, `V = X W_V`. The model learns `W_Q`, `W_K`, and `W_V` so that the dot products between queries and keys encode useful relationships. Nothing else is added — self-attention is, at its core, three matrix multiplications, a scaled dot product, a softmax, and one more matrix multiplication.
+
+<Callout type="tip">
+The word "self" means Q, K, and V all derive from the *same* sequence. In cross-attention (the decoder of a Transformer), the queries come from one sequence and the keys/values from another — same math, different sources.
+</Callout>
+
+## The Mathematics
+
+The complete operation is captured in one elegant formula. With queries `Q`, keys `K`, and values `V` (each a matrix of shape `n × d_k`, where `n` is sequence length):
+
+<MathBlock
+  formula="\text{Attention}(Q, K, V) = \text{softmax}\!\left(\frac{Q K^{\top}}{\sqrt{d_k}}\right) V"
+  caption="Scaled dot-product attention — the core operation of the Transformer."
+/>
+
+Read it from the inside out. The product `Q K^{\top}` computes, for every pair of tokens, the dot product of one token's query with another's key — an `n × n` matrix of raw relevance scores. Dividing by `√d_k` scales those scores (more on why below). The softmax is applied **row-wise**, turning each row into a probability distribution over all tokens — these are the attention weights:
+
+<MathBlock
+  formula="A = \text{softmax}\!\left(\frac{Q K^{\top}}{\sqrt{d_k}}\right), \qquad A_{ij} = \text{attention from token } i \text{ to token } j"
+  caption="The attention matrix A: row i sums to 1 and gives token i's distribution over all tokens."
+/>
+
+Finally, multiplying the attention matrix by `V` produces, for each token, a weighted sum of all value vectors — its context-enriched output:
+
+<MathBlock
+  formula="\text{output}_i = \sum_{j=1}^{n} A_{ij}\, v_j"
+  caption="Each token's output is a weighted blend of every token's value, weighted by attention."
+/>
+
+That is the whole thing. Three projections to get Q, K, V; a scaled dot product to score; a softmax to normalize; a weighted sum of values to output.
+
+## Why divide by √d_k?
+
+The scaling factor `1/√d_k` is small but essential. Consider the dot product of a query and key, each a `d_k`-dimensional vector of roughly unit-variance random numbers. The dot product sums `d_k` such products, so its variance grows with `d_k` and its magnitude scales like `√d_k`. For a typical `d_k` of 64, raw dot products can reach magnitudes of ±8 or more.
+
+Feed numbers that large into a softmax and it *saturates*: one entry dominates and the rest collapse toward zero. A saturated softmax has near-zero gradients almost everywhere, so learning stalls. Dividing by `√d_k` rescales the scores back to roughly unit variance, keeping the softmax in a responsive region where gradients flow. It is a tiny normalization with an outsized effect on trainability.
+
+<Callout type="warning" title="The √d_k factor is not cosmetic">
+Remove the scaling and Transformers become much harder to train, especially with large head dimensions: the softmax saturates, gradients vanish, and optimization stalls. The factor keeps dot-product magnitudes independent of dimensionality.
+</Callout>
+
+## Complexity: the price of looking everywhere
+
+Self-attention's power has a cost. Computing `Q K^{\top}` produces an `n × n` matrix, so both the computation and the memory scale with the **square** of the sequence length:
+
+<MathBlock
+  formula="\text{cost} = \mathcal{O}(n^2 \cdot d)"
+  caption="Quadratic in sequence length n, linear in model dimension d."
+/>
+
+Doubling the context length quadruples the attention cost. For a 1,000-token document that is a million attention scores; for 100,000 tokens it is ten billion. This quadratic wall is the central reason long-context models are expensive, and taming it (Flash Attention, sparse and linear attention, paged KV caches) is a major research thread you will meet in Topic 38.
+
+## Visualizing self-attention
+
+The attention matrix `A` is exactly what makes self-attention interpretable. Each row shows how one token distributes its attention across the sequence. Try the interactive heatmap below: click a token on the left to focus its row, and use the slider to switch between heads that have learned different patterns — local focus, attending to the subject, or looking at the previous token.
+
+<DiagramWrapper title="Self-attention weight matrix" caption="Click a token (left axis) to highlight its attention row; slide to switch between learned heads.">
+  <AttentionHeatmap client:visible />
+</DiagramWrapper>
+
+## A concrete walkthrough
+
+It helps to trace one token through the operation. Take the sentence "the cat sat" and focus on producing the new representation for "sat". First, "sat" emits its query vector — a compressed statement of what it is looking for, perhaps "I am a verb seeking my subject." That query is dot-producted with the key of every token: "the", "cat", and "sat" itself. Suppose the dot products, after scaling, come out as 0.2 for "the", 2.1 for "cat", and 1.0 for "sat". Softmax turns these into weights of roughly 0.10, 0.62, and 0.28. The new representation of "sat" is then 0.10 times the value of "the" plus 0.62 times the value of "cat" plus 0.28 times its own value. The result is a vector for "sat" that has pulled in most of its meaning from "cat" — exactly the subject-verb link we would want.
+
+Every token does this simultaneously. "the" builds its own blend, "cat" builds its own, and because the three queries, keys, and values are all computed at once as matrix multiplications, the whole sentence is processed in parallel. This parallelism is the second great advantage of self-attention over recurrence — not only is every token one hop from every other, but there is no left-to-right dependency forcing sequential computation. On modern hardware built for large matrix multiplies, that parallelism is the difference between training on a billion tokens and training on a trillion.
+
+## Permutation invariance: the catch
+
+Self-attention has a subtle and important blind spot: on its own, it does not know the *order* of the tokens. Look again at the formula. Every token attends to every other token through dot products of queries and keys, and a sum is unchanged if you reorder its terms. Shuffle the input tokens and self-attention produces the same set of outputs, merely permuted. To the mechanism, "the cat sat" and "sat cat the" are identical bags of vectors.
+
+This property is called **permutation invariance**, and it is a real problem, because word order obviously carries meaning — "dog bites man" is not "man bites dog." Recurrent networks got order for free, because they processed tokens one after another. Self-attention threw that away in exchange for parallelism and direct long-range connections. The fix is to *inject* position information into the token representations before attention runs, so that a token's vector encodes not just *what* it is but *where* it sits. That injection is the subject of Topic 14, positional encoding. For now, hold onto the tension: self-attention is powerful precisely because it treats the sequence as a set, and it needs a separate mechanism to recover the order it deliberately ignores.
+
+## A preview: masking attention
+
+One more variation deserves a mention now, because it returns in the decoder. Sometimes you must *forbid* a token from attending to certain positions. The most important case is autoregressive generation: when a language model predicts the next word, each position is only allowed to attend to itself and the positions *before* it — never to future words it has not generated yet. Letting a token peek at the future would be cheating, since the future is exactly what the model is trying to predict.
+
+This is achieved with a **mask**. Before the softmax, the scores for forbidden positions are set to negative infinity, so after the softmax their attention weights become exactly zero. A "causal" mask is an upper-triangular block of negative infinities that blocks every position from seeing anything to its right. The mechanism is otherwise unchanged — same queries, keys, values, and scaled dot products — but the mask turns bidirectional self-attention (which BERT uses) into the left-to-right, causal self-attention (which GPT uses). You will implement exactly this when we build the Transformer decoder in Topic 16; for now, just note that masking is a one-line addition that fundamentally changes what the model is allowed to know.
+
+## Code Example
+
+The implementation below computes scaled dot-product self-attention from scratch in PyTorch — no library attention module — so you can see every matrix in the formula. It runs on a toy sequence and prints the attention matrix and output shape.
+
+<CodeBlock lang="python" filename="self_attention.py" code={`# self_attention.py
+# pip install torch
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class SelfAttention(nn.Module):
+    def __init__(self, d_model, d_k):
+        super().__init__()
+        self.Wq = nn.Linear(d_model, d_k, bias=False)
+        self.Wk = nn.Linear(d_model, d_k, bias=False)
+        self.Wv = nn.Linear(d_model, d_k, bias=False)
+        self.d_k = d_k
+
+    def forward(self, x):
+        # x: (batch, n, d_model)
+        Q, K, V = self.Wq(x), self.Wk(x), self.Wv(x)   # each (batch, n, d_k)
+        scores = Q @ K.transpose(-2, -1) / self.d_k ** 0.5   # (batch, n, n)
+        A = F.softmax(scores, dim=-1)                  # row-wise attention weights
+        out = A @ V                                    # (batch, n, d_k)
+        return out, A
+
+torch.manual_seed(0)
+n, d_model, d_k = 4, 16, 8           # 4 tokens: "the cat sat down"
+attn = SelfAttention(d_model, d_k)
+x = torch.randn(1, n, d_model)
+out, A = attn(x)
+
+print("attention matrix (rows sum to 1):")
+print(A.detach().numpy().round(2)[0])
+print("row sums:", A.sum(-1).detach().numpy().round(3)[0])
+print("output shape:", tuple(out.shape))
+
+# Expected (values vary with seed):
+# attention matrix (rows sum to 1):
+# [[0.28 0.21 0.24 0.27]
+#  [0.19 0.34 0.22 0.25]
+#  ...]
+# row sums: [1. 1. 1. 1.]
+# output shape: (1, 4, 8)
+`} />
+
+Notice that the attention matrix is `n × n` (here 4×4), each row is a valid probability distribution, and the output has one context-enriched vector per token. There is no recurrence anywhere — every token attended to every other in a single parallel operation. This is the engine. The next two topics add two refinements on top of it: running several of these in parallel (multi-head attention) and injecting position information (positional encoding).
+
+<KeyTakeaways phase={2}>
+- **Self-attention points attention inward**: every token attends to every other token in the same sequence, making any two tokens one hop apart.
+- **Query, key, value** are three learned linear projections of the *same* input; a token's query is matched against all keys to decide how much of each value to absorb.
+- The core formula is **softmax(QKᵀ/√d_k)·V**: score, scale, normalize row-wise, then weight the values.
+- The **√d_k scaling** prevents the softmax from saturating in high dimensions, keeping gradients healthy.
+- Self-attention is **O(n²·d)** — quadratic in sequence length — which is why long context is expensive.
+- The **attention matrix is interpretable**: each row shows how a token distributes attention across the sequence.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Why do we divide the attention scores by √d_k?",
+    options: ["To speed up the matrix multiply", "To prevent the softmax from saturating in high dimensions (keeping gradients healthy)", "To normalize the output vectors to unit length", "To reduce memory usage"],
+    correctIndex: 1,
+    explanation: "Dot products of d_k-dimensional vectors grow in magnitude like √d_k. Without scaling, large values push the softmax into saturated regions with vanishing gradients. Dividing by √d_k keeps scores in a trainable range."
+  },
+  {
+    question: "In self-attention, where do Q, K, and V come from?",
+    options: ["Three different sequences", "Three learned linear projections of the same input", "Random initialization at each step", "The previous decoder state only"],
+    correctIndex: 1,
+    explanation: "Self-attention computes Q = XW_Q, K = XW_K, V = XW_V from the same input X. 'Self' means all three derive from one sequence."
+  },
+  {
+    question: "What is the computational complexity of self-attention in sequence length n?",
+    options: ["O(n)", "O(n log n)", "O(n²·d)", "O(1)"],
+    correctIndex: 2,
+    explanation: "Computing QKᵀ produces an n×n score matrix, so cost and memory scale quadratically with sequence length (and linearly with model dimension d)."
+  }
+]} />
+
+## What's Next
+
+A single self-attention computes one set of relationships — one "perspective" on the sequence. But syntax, semantics, and coreference are different kinds of relationships. In **Multi-Head Attention**, we run several self-attentions in parallel, each in its own subspace, so the model can attend to many kinds of relationships at once.

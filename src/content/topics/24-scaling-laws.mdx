@@ -1,0 +1,190 @@
+---
+title: "Scaling Laws & Emergent Abilities"
+subtitle: "The math behind bigger-is-better — and when things suddenly work"
+phase: 3
+topicNumber: 24
+slug: "scaling-laws"
+readingTime: 14
+prerequisites: ["llm-evolution"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('scaling-laws');
+
+<TopicHero topic={topic} />
+
+The scaling era was not blind luck. Researchers discovered that a language model's performance follows remarkably smooth, predictable **scaling laws**: increase the model size, the data, or the compute, and the loss decreases along a clean power-law curve that you can extrapolate. These laws turned "make it bigger" from a hope into an engineering plan — you could predict the loss of a model before training it. This topic covers the original Kaplan scaling laws, the Chinchilla result that corrected how to spend compute, and the more contentious phenomenon of *emergent abilities* that appear suddenly at scale.
+
+Understanding scaling laws is what separates folklore ("bigger is better") from quantitative practice ("a model with N parameters trained on D tokens will reach loss L"). It also explains a costly mistake the whole field made before Chinchilla, and how fixing it produced smaller, cheaper, better models.
+
+## The scaling hypothesis
+
+The core empirical finding is that test loss decreases as a **power law** in three resources: the number of model parameters `N`, the size of the training dataset `D`, and the amount of compute `C`. Crucially, these curves are smooth and span many orders of magnitude — plot loss against any of the three on log-log axes and you get a nearly straight line. This regularity means you can train a series of small models, fit the curve, and *extrapolate* to predict how a much larger model will perform, which is exactly how labs justify enormous training runs before committing the compute.
+
+## The Mathematics: power laws
+
+Kaplan and colleagues at OpenAI (2020) quantified the relationships. When data and compute are not the bottleneck, loss falls as a power law in model size:
+
+<MathBlock
+  formula="L(N) \approx \left(\frac{N_c}{N}\right)^{\alpha_N}"
+  caption="Loss vs parameters: a power law with exponent α_N (about 0.076 in the original study)."
+/>
+
+Symmetrically, with model size and compute ample, loss falls as a power law in dataset size:
+
+<MathBlock
+  formula="L(D) \approx \left(\frac{D_c}{D}\right)^{\alpha_D}"
+  caption="Loss vs data: another power law, with its own exponent and constant."
+/>
+
+The small exponents (well under 1) capture the diminishing returns: each 10× increase in scale buys a fixed *additive* reduction in loss, not a multiplicative one. Progress is real but expensive — you must keep multiplying resources to keep subtracting from the loss.
+
+## Chinchilla: spend compute correctly
+
+Kaplan's laws suggested making models very large. But in 2022, Hoffmann and colleagues at DeepMind (the **Chinchilla** paper) found that the early large models were badly *undertrained* — they had too many parameters for the data they were trained on. Given a fixed compute budget, there is an optimal *balance* between model size and training tokens, and the optimum allocates them roughly equally in scaling. The headline rule of thumb:
+
+<MathBlock
+  formula="D_{\text{opt}} \approx 20 \times N"
+  caption="Chinchilla rule: train on about 20 tokens per parameter for compute-optimal performance."
+/>
+
+By this rule, a 70-billion-parameter model should train on about 1.4 trillion tokens. The Chinchilla model itself was *smaller* than GPT-3 (70B vs 175B) but trained on far more data, and it **outperformed** GPT-3. The lesson reshaped the field: many earlier models had wasted compute on parameters they could not feed enough data, and the fix was to train smaller models on much more text.
+
+<Callout type="info" title="Why open models caught up">
+Chinchilla explains the open-source surge. Models like LLaMA are relatively small (7B-70B) but trained on trillions of tokens — Chinchilla-optimal or beyond. A well-trained 7B model can rival an undertrained model many times larger, which is why capable models now run on a laptop.
+</Callout>
+
+## Pre-Chinchilla vs post-Chinchilla
+
+Before Chinchilla, the race was for parameter count; GPT-3's 175B was a badge of honour. After Chinchilla, the race shifted to *tokens*: train smaller models on far more data, often well past the 20× rule (since smaller models are cheaper to *serve*, it pays to over-train them). Modern open models are typically trained on trillions of tokens — many times their Chinchilla-optimal data — precisely because inference cost, not training cost, dominates over a model's lifetime. The scaling laws did not just predict performance; they rewrote the strategy.
+
+## Emergent abilities
+
+Smooth loss curves hide a stranger phenomenon. On many *specific tasks* — multi-step arithmetic, word unscrambling, chained reasoning — performance stays near chance for small models and then, past some scale, jumps to useful levels. These are **emergent abilities**: capabilities essentially absent below a threshold and present above it. Chain-of-thought reasoning is the classic example; it barely helps small models but dramatically helps large ones. Because you cannot always predict which ability the next scale-up will unlock, emergence was a major motivation for ever-larger models.
+
+## Is emergence real or a mirage?
+
+Emergence is genuinely debated. A prominent critique argues that some apparent emergence is an **artifact of the metric**: if you score a task with a harsh all-or-nothing metric (exact match on a multi-digit sum), performance looks like it jumps from zero to useful, but if you use a smoother metric (per-digit accuracy), the underlying capability improves gradually and continuously. Under this view, the *capability* scales smoothly and only the *measurement* makes it look abrupt. The debate is unresolved and nuanced — some abilities do seem to have genuine phase-transition character — but the practical reality stands: large models can do things small ones cannot, however smoothly the underlying competence may be improving.
+
+## Implications for training on a budget
+
+Scaling laws are intensely practical. They let you (1) predict a large model's loss from small pilot runs, derisking expensive training; (2) allocate a fixed compute budget optimally between model size and data via the Chinchilla rule; and (3) decide whether to over-train a smaller model when serving cost matters. If you cannot afford the frontier, the laws tell you the *best* model you can train for your budget — usually a smaller, well-fed model rather than a large, starved one.
+
+## The compute axis: FLOPs, and the N times D shortcut
+
+The third resource, compute `C`, ties the other two together, and a single approximation makes the whole framework usable. Training compute is measured in floating-point operations (FLOPs), and for a Transformer it is well approximated by a strikingly simple formula: training a model of `N` parameters on `D` tokens costs roughly `6 × N × D` FLOPs. The factor of six comes from counting the multiply-adds in the forward and backward passes per parameter per token. This back-of-the-envelope relation is the workhorse of scaling analysis.
+
+It is exactly this `C ≈ 6ND` relation that lets Chinchilla pose its question cleanly. Fix a compute budget `C`; then `N` and `D` trade off against each other along the curve `N × D = C / 6`. Spend more on parameters and you must train on fewer tokens; spend more on tokens and you must shrink the model. The compute-optimal point is where, along that trade-off curve, the loss is lowest — and Chinchilla's finding was that this optimum sits at roughly equal scaling of `N` and `D`, giving the 20-tokens-per-parameter rule. Understanding that compute, parameters, and data are bound by `C ≈ 6ND` turns vague intuition about "bigger models" into a precise budgeting problem, and it is why a lab can state, before training, both how much a run will cost and how good the result should be.
+
+## What scaling does not fix
+
+Scaling laws are seductive, and it is important to know their limits, because believing scale solves everything leads to expensive mistakes. First, the laws describe **pre-training loss on the training distribution**, not truthfulness, safety, or helpfulness. A model can have a beautifully low loss and still hallucinate, refuse reasonable requests, or behave toxically — those properties come from the alignment stages ahead, not from scale. Lower loss means better next-token prediction, which is necessary but not sufficient for a good assistant.
+
+Second, scaling has **diminishing returns** baked into its small exponents, and eventually you exhaust high-quality data. There is a finite amount of good text on the internet, and several analyses suggest the largest models are approaching or have reached the limits of available high-quality tokens, which is part of why synthetic data, multimodal data, and better data curation have become research priorities. Third, scaling laws are **distribution-specific**: a law fit on web text does not necessarily predict performance on code, math, or a new language. Scale is a powerful lever, but it is one lever among several — data quality, objective, alignment, and architecture refinements all matter, and the cheapest path to a better model is often not "add parameters" but "improve the data" or "align it better." Treating scaling laws as the whole story, rather than as one well-quantified part of it, is a classic trap.
+
+## Scaling beyond language
+
+A final perspective worth holding: scaling laws are not unique to language. Similar smooth power-law relationships between loss and scale have been observed across modalities — in image models, in speech, in reinforcement learning, and in multimodal systems. The exponents differ, but the qualitative pattern recurs: more parameters, more data, and more compute yield predictably lower loss along a power law. This universality is itself a clue about deep learning. It suggests that, across very different domains, large neural networks trained on large datasets are doing something fundamentally similar — compressing the structure of their data — and that the returns to scale, while diminishing, are remarkably reliable.
+
+For a practitioner, the cross-domain reach of scaling laws reinforces a strategic point. When a problem is bottlenecked by model capability, the scaling relationship tells you whether throwing more scale at it is likely to help and roughly how much it will cost. When the bottleneck is elsewhere — noisy data, a misaligned objective, a task the pre-training distribution never covered — no amount of scale will rescue it, and the scaling curve will flatten against an irreducible floor. Reading which regime you are in, capability-bound or data-and-alignment-bound, is one of the most valuable judgments scaling laws enable, and it recurs constantly as you move into the applied and agentic phases ahead.
+
+## Code Example
+
+The code fits a power law to a series of (compute, loss) measurements and uses it to extrapolate the loss at a larger, unseen scale — exactly the workflow labs use to plan training runs.
+
+<CodeBlock lang="python" filename="scaling_law_fit.py" code={`# scaling_law_fit.py
+# pip install numpy matplotlib
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Pilot runs: model sizes (params) and their observed test loss
+N = np.array([1e6, 1e7, 1e8, 1e9, 1e10])     # parameters
+L = np.array([4.20, 3.55, 3.02, 2.61, 2.28]) # measured loss
+
+# Fit a power law L(N) = (Nc / N)^a  =>  log L = a*(log Nc - log N)
+# Linear fit in log-log space: log L = b - a*log N
+logN, logL = np.log10(N), np.log10(L)
+a, b = np.polyfit(logN, logL, 1)              # slope, intercept
+alpha = -a
+print(f"fitted exponent alpha_N = {alpha:.3f}")
+
+# Extrapolate to a 100B-parameter model (unseen)
+N_big = 1e11
+logL_pred = b + a * np.log10(N_big)
+L_pred = 10 ** logL_pred
+print(f"predicted loss at N=100B: {L_pred:.3f}")
+
+plt.loglog(N, L, "o", label="pilot runs")
+plt.loglog([N.min(), N_big], 10 ** (b + a * np.log10([N.min(), N_big])),
+           "--", label="power-law fit")
+plt.xlabel("parameters (log)"); plt.ylabel("loss (log)")
+plt.legend(); plt.savefig("scaling.png", dpi=120)
+
+# Expected (approx):
+# fitted exponent alpha_N = 0.066
+# predicted loss at N=100B: ~2.0
+`} />
+
+The fit recovers a small power-law exponent — each order of magnitude in parameters shaves a roughly constant amount off the log-loss — and lets you predict the loss at 100B parameters from runs that topped out at 10B. This is the everyday magic of scaling laws: a handful of cheap pilot runs forecast the behaviour of a model far too expensive to train speculatively, turning a multi-million-dollar gamble into a calculated, derisked investment. The Chinchilla rule then tells you how many tokens that 100B model should see — about two trillion — and the 6ND estimate tells you the compute bill before you spend a dollar of it.
+
+<PaperLink
+  title="Scaling Laws for Neural Language Models"
+  authors="Kaplan, McCandlish, et al."
+  year={2020}
+  venue="OpenAI"
+  url="https://arxiv.org/abs/2001.08361"
+/>
+
+<PaperLink
+  title="Training Compute-Optimal Large Language Models (Chinchilla)"
+  authors="Hoffmann, Borgeaud, Mensch, et al."
+  year={2022}
+  venue="DeepMind / NeurIPS"
+  url="https://arxiv.org/abs/2203.15556"
+/>
+
+<KeyTakeaways phase={3}>
+- Language-model loss follows smooth **power laws** in parameters `N`, data `D`, and compute `C` — straight lines on log-log axes that **extrapolate**.
+- The small exponents mean **diminishing returns**: each 10× of scale subtracts a fixed amount from the loss.
+- **Chinchilla** showed early big models were undertrained; the compute-optimal rule is about **20 tokens per parameter**.
+- Post-Chinchilla, the field trains **smaller models on far more data** — often beyond 20× — because serving cost dominates over a model's lifetime.
+- **Emergent abilities** appear suddenly at scale (e.g. chain-of-thought), though some emergence may be a **measurement artifact** of harsh metrics.
+- Scaling laws are practical: predict loss from pilot runs, allocate budget optimally, and pick the best model for your compute.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "According to the Chinchilla rule of thumb, how many tokens should a 7B-parameter model be trained on for compute-optimal performance?",
+    options: ["About 7 billion", "About 140 billion (≈20 × 7B)", "About 7 trillion", "It doesn't matter"],
+    correctIndex: 1,
+    explanation: "Chinchilla's rule is roughly 20 tokens per parameter, so a 7B model is compute-optimal at about 140 billion tokens — though models are often trained on even more when serving cost matters."
+  },
+  {
+    question: "What did the Chinchilla paper reveal about earlier large models like GPT-3?",
+    options: ["They were too small", "They were undertrained — too many parameters for the data they saw", "They used the wrong vocabulary", "They had no scaling law"],
+    correctIndex: 1,
+    explanation: "Chinchilla showed that for their compute, early models had too many parameters and too little data. A smaller model (Chinchilla, 70B) trained on more tokens beat the larger GPT-3 (175B)."
+  },
+  {
+    question: "What is the critique that emergent abilities might be a 'mirage'?",
+    options: ["The models are fake", "Harsh all-or-nothing metrics make smoothly-improving capabilities look like sudden jumps", "Scaling laws are wrong", "Emergence only happens in vision"],
+    correctIndex: 1,
+    explanation: "The critique argues that with a smoother metric (e.g. per-digit accuracy), the underlying capability improves gradually; a strict exact-match metric makes it appear to jump abruptly from zero to useful."
+  }
+]} />
+
+## What's Next
+
+Scaling produces powerful but raw models that continue text rather than follow instructions. The next three topics fix that. In **Instruction Tuning & FLAN**, we see how fine-tuning on instruction-response pairs teaches a model to actually do what you ask — the first step from a text-predictor to an assistant.

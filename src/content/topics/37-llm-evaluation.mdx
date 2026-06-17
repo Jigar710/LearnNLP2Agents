@@ -1,0 +1,181 @@
+---
+title: "LLM Evaluation — RAGAS, BLEU & Benchmarks"
+subtitle: "How do you know if your LLM or RAG system is actually good?"
+phase: 4
+topicNumber: 37
+slug: "llm-evaluation"
+readingTime: 15
+prerequisites: ["intro-to-rag"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('llm-evaluation');
+
+<TopicHero topic={topic} />
+
+You have built prompts, RAG, and pipelines — but how do you *know* any of it works? "It looks good when I try it" is how prototypes ship and production systems fail. Evaluating LLMs is genuinely hard: there is rarely a single correct output, quality is multidimensional, and the same prompt can give different answers each run. Yet without rigorous evaluation you cannot tell whether a change helped, compare models, or catch regressions. This topic covers the full evaluation toolkit: classic NLP metrics, LLM benchmarks, the increasingly-dominant LLM-as-judge approach, and RAGAS for RAG systems specifically.
+
+Evaluation is the unglamorous discipline that separates serious LLM engineering from demo-driven guesswork. The recurring lesson of this phase — measure, do not guess — comes home here, with the concrete tools to do it.
+
+## Why LLM evaluation is hard
+
+Traditional ML has clean metrics: accuracy, F1, a single right answer per example. LLM outputs defy this. There are **many valid outputs** — countless good summaries of an article, many correct phrasings of an answer — so exact-match scoring fails. Quality is **multidimensional**: an answer can be fluent but wrong, correct but unhelpful, accurate but unsafe. And generation is **stochastic**: temperature means the same input yields different outputs. These properties make evaluation an open problem, and the field uses a layered mix of approaches rather than one metric.
+
+## Classic NLP metrics
+
+The oldest metrics compare generated text to reference text by overlap. **BLEU** (machine translation) measures n-gram precision — how much of the candidate's n-grams appear in the reference. **ROUGE** (summarization) is recall-oriented — how much of the reference appears in the candidate. **METEOR** adds synonym and stemming awareness. These are cheap and reproducible but crude: they reward surface overlap, so a perfectly good paraphrase using different words scores poorly. **BERTScore** improves on this by comparing *embeddings* rather than exact tokens, rewarding semantic similarity. Classic metrics remain useful for tasks with reference outputs (translation, summarization) but poorly capture open-ended quality.
+
+## LLM benchmarks
+
+To compare *models*, the field uses standardized benchmarks. **MMLU** tests broad knowledge across 57 subjects with multiple-choice questions. **HellaSwag** and **WinoGrande** test commonsense reasoning, **ARC** science questions, **TruthfulQA** resistance to falsehoods, **HumanEval** code generation, and **GSM8K/MATH** mathematical reasoning. **BIG-Bench** and **HELM** are large aggregate suites. **LMSYS Chatbot Arena** ranks models by *human preference* via head-to-head battles — capturing helpfulness and tone that static benchmarks miss. Benchmarks let you compare models, but beware: they can leak into training data, and a model strong on MMLU may be weak at *your* task.
+
+## LLM-as-judge
+
+The most flexible modern approach is **LLM-as-judge**: use a capable model (often the strongest available) to *evaluate* outputs. You give the judge the input, the output (and optionally a reference or a rubric), and ask it to score quality, correctness, or which of two responses is better. LLM judges correlate surprisingly well with human judgment, scale far cheaper than human evaluation, and handle open-ended tasks that overlap metrics cannot. They are not perfect — judges have biases (favouring longer answers, their own style, the first option presented) — but with careful rubrics and bias mitigations, LLM-as-judge has become the workhorse of practical LLM evaluation.
+
+<Callout type="warning" title="LLM judges have biases">
+LLM judges can favour verbose answers, prefer outputs in their own style, and show position bias (favouring whichever response is shown first). Mitigate with clear rubrics, by swapping response order and averaging, and by spot-checking against human judgment.
+</Callout>
+
+## RAGAS: evaluating RAG specifically
+
+RAG systems need their own evaluation because they have two stages that can each fail. The **RAGAS** framework provides metrics computed (largely via LLM-as-judge) without requiring reference answers:
+
+- **Context Precision**: are the retrieved chunks relevant to the question? (retrieval precision)
+- **Context Recall**: did retrieval find all the information needed? (retrieval recall)
+- **Faithfulness**: is the answer supported by the retrieved context, or does it hallucinate? (generation grounding)
+- **Answer Relevancy**: does the answer actually address the question? (generation relevance)
+
+Together these pinpoint *where* a RAG system fails — bad retrieval shows up as low context precision/recall, bad generation as low faithfulness/relevancy — so you know whether to fix the retriever or the generator.
+
+<ComparisonTable
+  phase={4}
+  headers={["Approach", "Measures", "Needs reference?", "Best for"]}
+  rows={[
+    ["BLEU / ROUGE", "N-gram overlap", "Yes", "Translation, summarization"],
+    ["BERTScore", "Embedding similarity", "Yes", "Semantic match to a reference"],
+    ["Benchmarks (MMLU, etc.)", "Capability vs fixed tests", "Built-in", "Comparing models"],
+    ["LLM-as-judge", "Open-ended quality / preference", "Optional", "Most real applications"],
+    ["RAGAS", "Retrieval + generation quality", "Mostly no", "RAG pipelines"],
+  ]}
+  caption="Evaluation approaches, from overlap metrics to LLM judges."
+/>
+
+## Building your own evaluation dataset
+
+The single most valuable evaluation asset is a **golden dataset** of representative inputs with known-good outputs (or judgment criteria) for *your* task. Public benchmarks tell you about general capability; only your own dataset tells you whether your system works for your users. Build it from real or realistic queries, cover edge cases, and grow it over time — every bug you find becomes a new test case. Run candidate prompts, models, and pipelines against it and score with the appropriate method. This dataset is a regression suite that catches when a change quietly breaks something.
+
+## Vibe-check vs systematic evaluation
+
+Early on, "vibe-checking" — eyeballing a few outputs — is fine and fast. But it does not scale, is biased toward memorable cases, and cannot reliably detect small regressions. As a system matures, you must graduate to **systematic evaluation**: a fixed dataset, defined metrics, and automated scoring run on every change. The transition from vibe-check to systematic eval is a hallmark of a maturing LLM product, and teams that skip it ship regressions they never notice.
+
+## Online versus offline evaluation
+
+Everything described so far is **offline** evaluation: running a fixed dataset through the system in a controlled setting before deployment. It is essential but incomplete, because it cannot capture how *real users* interact with the system or how quality holds up on the messy, evolving distribution of live traffic. **Online** evaluation closes that gap by measuring the system in production: collecting user feedback (thumbs up/down, edits, regenerations), tracking behavioural signals (did the user accept the answer, ask a follow-up, or abandon?), and running A/B tests that route a fraction of traffic to a new version and compare outcomes on real metrics.
+
+The two are complementary and serve different purposes. Offline evaluation lets you iterate quickly and safely before shipping, catch regressions, and compare candidates on a stable benchmark. Online evaluation tells you whether those offline gains translate into real-world value, and it surfaces problems no offline set anticipated — the queries users actually ask are always stranger and more varied than the ones you imagined. Mature LLM products run both: a fast offline suite gating every change, and online metrics with A/B testing validating that changes help real users. A particularly valuable loop is to feed *back* the failures discovered online into the offline golden dataset, so that each production surprise becomes a permanent regression test. This virtuous cycle — offline gates changes, online finds new failures, failures become new offline tests — is how evaluation keeps pace with a system and a user base that never stop changing.
+
+## Evaluating safety and robustness
+
+Quality is not the only dimension that matters; for any deployed system you must also evaluate **safety** and **robustness**, which ordinary quality metrics ignore entirely. Safety evaluation checks whether the system refuses genuinely harmful requests, avoids generating toxic or biased content, and does not leak sensitive information. Robustness evaluation probes how the system behaves under adversarial or unexpected inputs: malformed queries, attempts at **prompt injection** (user input crafted to override the system's instructions), inputs in unexpected languages, and edge cases that the happy-path golden dataset never covers.
+
+These evaluations require their own datasets — collections of harmful prompts, injection attempts, and adversarial inputs — and their own metrics, typically framed as "did the system behave safely?" rather than "was the answer good?" They matter intensely as systems gain the ability to *act* in the agentic phase ahead, where a safety failure can mean not just a bad answer but a harmful action taken in the world. Building a safety and robustness evaluation suite alongside the quality suite is non-negotiable for production systems, especially those exposed to untrusted users. The discipline is the same — a curated dataset, defined criteria, automated scoring — applied to a different and higher-stakes set of behaviours. A system that scores beautifully on helpfulness but has never been tested against injection or harmful requests is not actually ready to deploy, however good its answers look in the demo.
+
+## Statistical rigor: variance and significance
+
+A final, easily-overlooked point: because LLM generation is stochastic and evaluation sets are finite, evaluation results have **variance**, and ignoring it leads to false conclusions. Run the same evaluation twice with temperature above zero and the scores differ; evaluate two prompts on a small dataset and the apparent winner may be noise. Treating a one-point score difference on fifty examples as a real improvement is a classic mistake that sends teams optimizing in the wrong direction.
+
+The remedies are standard statistics applied to evaluation. Use a **large enough** evaluation set that score differences are meaningful, run evaluations **multiple times** and report averages and variance, and where a decision hinges on a close result, check whether the difference is **statistically significant** rather than within the noise band. Fixing the random seed where possible reduces run-to-run variance for reproducibility. None of this is exotic — it is the ordinary rigor of any empirical science — but it is frequently skipped in the rush to ship, and skipping it means you cannot actually trust your own evaluation. The whole point of measuring is to make reliable decisions, and a measurement you cannot distinguish from noise supports no reliable decision at all. Bringing genuine statistical care to evaluation is what turns "the numbers went up" into "we are confident this change is an improvement," which is the entire purpose of the exercise.
+
+## Cost and latency are evaluation metrics too
+
+Quality, safety, and robustness are not the whole story; a production evaluation must also track **cost** and **latency**, because a system that gives perfect answers too slowly or too expensively is not actually viable. Every evaluation run should record the tokens consumed and the wall-clock time per request alongside the quality scores, so that when you compare two approaches you see the full trade-off, not just accuracy. An elaborate multi-call pipeline that nudges quality up a point while tripling cost and latency may be the wrong choice, and you cannot make that judgment without the cost and latency numbers in front of you.
+
+This matters especially because so many of the techniques in this phase — self-consistency, multi-query retrieval, re-ranking, agentic loops — buy quality with extra model calls. Folding their cost and latency into the same evaluation as their quality keeps the comparison honest and prevents the common failure of optimizing accuracy in isolation until the system is too slow or expensive to ship. The most useful evaluation dashboards show quality, cost, and latency together for each candidate, turning model and pipeline selection into a clear-eyed trade-off rather than a one-dimensional chase. Treating efficiency as a first-class evaluation metric, not an afterthought, is what connects the measurement discipline of this topic to the optimization techniques of the next.
+
+## Code Example
+
+The code computes classic overlap metrics (BLEU, ROUGE) against a reference and then runs an LLM-as-judge evaluation, the two ends of the evaluation spectrum.
+
+<CodeBlock lang="python" filename="evaluation.py" code={`# evaluation.py
+# pip install nltk rouge-score anthropic
+import os, json
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+from rouge_score import rouge_scorer
+from anthropic import Anthropic
+
+reference = "The capital of France is Paris."
+candidate = "Paris is the capital city of France."
+
+# --- Classic overlap metrics (need a reference) ---
+bleu = sentence_bleu([reference.split()], candidate.split(),
+                     smoothing_function=SmoothingFunction().method1)
+rouge = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=True)
+rl = rouge.score(reference, candidate)["rougeL"].fmeasure
+print(f"BLEU: {bleu:.3f}   ROUGE-L: {rl:.3f}")
+# Note: a correct paraphrase scores only moderately on overlap metrics.
+
+# --- LLM-as-judge (handles paraphrase, open-ended quality) ---
+client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+judge_prompt = f'''Rate the candidate answer for correctness and helpfulness
+on a 1-5 scale. Respond as JSON: {{"score": <int>, "reason": "<text>"}}.
+
+Question: What is the capital of France?
+Candidate: {candidate}'''
+msg = client.messages.create(
+    model="claude-opus-4-8", max_tokens=150,
+    messages=[{"role": "user", "content": judge_prompt}],
+)
+print("LLM judge:", msg.content[0].text)
+
+# Expected:
+# BLEU: ~0.30   ROUGE-L: ~0.55   (paraphrase penalized by overlap metrics)
+# LLM judge: {"score": 5, "reason": "Correct and clearly phrased."}
+`} />
+
+The contrast is the lesson: BLEU and ROUGE *underrate* the candidate because it paraphrases the reference with different words, even though it is perfectly correct — the weakness of overlap metrics on open-ended text. The LLM judge, reading for meaning, correctly scores it highly. For most real LLM applications, where outputs are open-ended and references are scarce or impossible, LLM-as-judge against a curated golden dataset is the practical backbone of evaluation.
+
+<KeyTakeaways phase={4}>
+- LLM evaluation is hard: **many valid outputs**, **multidimensional quality**, and **stochastic generation** defeat single-number, exact-match scoring.
+- **Classic metrics** (BLEU, ROUGE) measure n-gram overlap and need references; they penalize valid paraphrases. **BERTScore** uses embeddings to reward semantic match.
+- **Benchmarks** (MMLU, HumanEval, Chatbot Arena) compare models but can leak into training and may not reflect your task.
+- **LLM-as-judge** is the flexible workhorse for open-ended quality — cheaper than humans, but watch for length, style, and position **biases**.
+- **RAGAS** evaluates RAG with **context precision/recall** (retrieval) and **faithfulness/answer relevancy** (generation), pinpointing where the system fails.
+- Build a **golden evaluation dataset** for your task and graduate from **vibe-checking to systematic evaluation** — it is a regression suite for behaviour.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What does RAGAS 'faithfulness' measure?",
+    options: ["Whether retrieval was fast", "Whether the generated answer is supported by the retrieved context (vs hallucinating)", "Whether the query was well-formed", "The embedding dimension"],
+    correctIndex: 1,
+    explanation: "Faithfulness checks that the answer's claims are grounded in the retrieved context rather than invented, isolating generation-stage hallucination from retrieval quality."
+  },
+  {
+    question: "Why do BLEU and ROUGE often underrate a correct answer?",
+    options: ["They are too slow", "They reward surface n-gram overlap, so a correct paraphrase using different words scores poorly", "They need no reference", "They only work for code"],
+    correctIndex: 1,
+    explanation: "Overlap metrics compare exact n-grams to a reference. A valid paraphrase that conveys the same meaning with different wording shares few n-grams and scores low, despite being correct."
+  },
+  {
+    question: "What is a key caution when using LLM-as-judge?",
+    options: ["It cannot score anything", "Judges have biases — favouring verbose answers, their own style, or whichever response is shown first", "It only works offline", "It requires a reference every time"],
+    correctIndex: 1,
+    explanation: "LLM judges exhibit length, style, and position biases. Mitigate with clear rubrics, swapping response order and averaging, and periodic comparison against human judgment."
+  }
+]} />
+
+## What's Next
+
+You can build and evaluate LLM systems — the final piece is running them fast and cheap enough for production. In **Inference Optimization — KV Cache, Flash Attention & vLLM**, we study the techniques that make LLM serving efficient at scale, completing the applied engineering phase.

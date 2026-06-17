@@ -1,0 +1,44 @@
+/* KaTeX base styles (rendered at build time by rehype-katex) */
+@import "katex/dist/katex.min.css";
+
+/* ============================================================
+   KaTeX theme overrides
+   ============================================================ */
+
+/* Inherit the page text color so equations adapt to light/dark mode */
+.katex {
+  color: var(--text-primary);
+  font-size: 1.05em;
+}
+
+/* Display equations: centered block with horizontal scroll on overflow (mobile-safe) */
+.katex-display {
+  margin: 1.5rem 0;
+  padding: 0.5rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.katex-display > .katex {
+  white-space: nowrap;
+}
+
+/* Caption under display equations (MathBlock component) */
+.math-caption {
+  display: block;
+  text-align: center;
+  margin-top: 0.5rem;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Soften the harsh KaTeX rule/line colors in dark mode */
+html[data-theme="dark"] .katex .frac-line,
+html[data-theme="dark"] .katex .overline .overline-line,
+html[data-theme="dark"] .katex .underline .underline-line,
+html[data-theme="dark"] .katex .hline,
+html[data-theme="dark"] .katex .sqrt > .root {
+  border-color: var(--text-secondary);
+}

@@ -1,0 +1,236 @@
+---
+/**
+ * Sidebar (PRD §10.4 / Step 5.2) — left navigation tree.
+ * Collapsible phase sections (native <details>), active-topic highlight,
+ * localStorage-driven completion checkmarks + per-phase % + overall progress.
+ */
+import { PHASES, getTopicsByPhase } from '../../data/curriculum';
+import { withBase } from '../../utils/base';
+
+interface Props {
+  activeSlug?: string;
+}
+const { activeSlug } = Astro.props;
+---
+
+<aside class="sidebar" data-pagefind-ignore>
+  <nav class="sidebar-nav" aria-label="Curriculum">
+    {
+      PHASES.map((phase) => {
+        const topics = getTopicsByPhase(phase.id);
+        const isActivePhase = topics.some((t) => t.slug === activeSlug);
+        return (
+          <details class="phase-section" open={isActivePhase} style={`--accent: ${phase.cssVar}`}>
+            <summary class="phase-summary">
+              <span class="phase-dot" />
+              <span class="phase-name">Phase {phase.id}: {phase.title}</span>
+              <span class="phase-badge">0/{topics.length}</span>
+              <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+            </summary>
+            <ul class="topic-list">
+              {topics.map((t) => (
+                <li class={`topic-item${t.slug === activeSlug ? ' is-active' : ''}`} data-slug={t.slug}>
+                  <a href={withBase(`/topic/${t.slug}`)} aria-current={t.slug === activeSlug ? 'page' : undefined}>
+                    <span class="check" aria-hidden="true">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                    </span>
+                    <span class="num">{String(t.id).padStart(2, '0')}.</span>
+                    <span class="t-title">{t.title}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </details>
+        );
+      })
+    }
+  </nav>
+
+  <div class="sidebar-foot">
+    <div class="overall">
+      <div class="overall-row">
+        <span>Overall progress</span>
+        <span id="sb-overall-pct">0%</span>
+      </div>
+      <div class="bar"><div id="sb-overall-bar" class="bar-fill" /></div>
+    </div>
+    <a href={withBase('/curriculum')} class="view-all">View Full Curriculum →</a>
+  </div>
+</aside>
+
+<style>
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 60px);
+    position: sticky;
+    top: 60px;
+    overflow: hidden;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border-color);
+  }
+  .sidebar-nav {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem 0.5rem 1rem 0.75rem;
+  }
+
+  .phase-section {
+    margin-bottom: 0.25rem;
+  }
+  .phase-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+  }
+  .phase-summary::-webkit-details-marker { display: none; }
+  .phase-summary:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .phase-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 9999px;
+    background: var(--accent);
+    flex-shrink: 0;
+  }
+  .phase-name {
+    flex: 1;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.2;
+  }
+  .phase-badge {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    padding: 1px 7px;
+    border-radius: 9999px;
+    white-space: nowrap;
+  }
+  .chev {
+    color: var(--text-muted);
+    transition: transform 150ms ease;
+    flex-shrink: 0;
+  }
+  .phase-section[open] .chev { transform: rotate(90deg); }
+
+  .topic-list {
+    list-style: none;
+    margin: 0.15rem 0 0.4rem;
+    padding: 0 0 0 0.35rem;
+  }
+  .topic-item a {
+    display: grid;
+    grid-template-columns: 16px auto 1fr;
+    align-items: start;
+    gap: 0.4rem;
+    padding: 0.3rem 0.5rem;
+    border-left: 2px solid transparent;
+    border-radius: 0 6px 6px 0;
+    font-size: 0.8125rem;
+    line-height: 1.35;
+    color: var(--text-secondary);
+  }
+  .topic-item a:hover {
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+  .topic-item.is-active a {
+    border-left-color: var(--accent);
+    color: var(--text-primary);
+    font-weight: 500;
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+  .num { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .check {
+    width: 16px;
+    height: 16px;
+    display: grid;
+    place-items: center;
+    color: var(--success);
+    opacity: 0;
+  }
+  .topic-item.is-complete .check { opacity: 1; }
+  .topic-item.is-complete .num { color: var(--success); }
+
+  .sidebar-foot {
+    border-top: 1px solid var(--border-color);
+    padding: 0.85rem 1rem;
+    background: var(--bg-sidebar);
+  }
+  .overall-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-bottom: 0.35rem;
+  }
+  .bar {
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--border-color);
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, var(--phase-1), var(--phase-5));
+    transition: width 300ms ease;
+  }
+  .view-all {
+    display: inline-block;
+    margin-top: 0.7rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--link-color);
+  }
+</style>
+
+<script>
+  function syncSidebarProgress() {
+    let completed: Set<string>;
+    try {
+      completed = new Set(JSON.parse(localStorage.getItem('nlp2agents-progress') || '[]'));
+    } catch {
+      completed = new Set();
+    }
+    let total = 0;
+    let done = 0;
+    document.querySelectorAll<HTMLElement>('.phase-section').forEach((sec) => {
+      const items = Array.from(sec.querySelectorAll<HTMLElement>('.topic-item'));
+      let c = 0;
+      items.forEach((li) => {
+        const isDone = li.dataset.slug ? completed.has(li.dataset.slug) : false;
+        li.classList.toggle('is-complete', isDone);
+        if (isDone) c++;
+      });
+      total += items.length;
+      done += c;
+      const badge = sec.querySelector('.phase-badge');
+      if (badge) badge.textContent = `${c}/${items.length}`;
+    });
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    const bar = document.getElementById('sb-overall-bar');
+    if (bar) bar.style.width = pct + '%';
+    const pe = document.getElementById('sb-overall-pct');
+    if (pe) pe.textContent = pct + '%';
+  }
+
+  syncSidebarProgress();
+
+  // Bring the active topic into view within the scroll container.
+  document.querySelector('.topic-item.is-active')?.scrollIntoView({ block: 'center' });
+
+  // Re-sync when progress changes (same tab via custom event, other tabs via storage).
+  document.addEventListener('nlp2agents:progress', syncSidebarProgress);
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'nlp2agents-progress') syncSidebarProgress();
+  });
+</script>

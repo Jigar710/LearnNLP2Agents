@@ -1,0 +1,203 @@
+---
+title: "Attention Mechanism — Bahdanau & Luong"
+subtitle: "Letting the decoder look at the entire source sequence"
+phase: 2
+topicNumber: 11
+slug: "attention-mechanism"
+readingTime: 15
+prerequisites: ["seq2seq"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('attention-mechanism');
+
+<TopicHero topic={topic} />
+
+The attention mechanism is arguably the single most important idea in modern NLP. It began as a fix for a specific weakness in sequence-to-sequence translation, but the principle it introduced — *let a model dynamically focus on the most relevant parts of its input* — proved so powerful that it was eventually distilled into the Transformer and now underpins every large language model in existence. This topic tells the origin story: how attention was invented to break the encoder-decoder bottleneck, and how the two classic formulations, Bahdanau and Luong, actually work.
+
+If you understand attention deeply here, the rest of Phase 2 becomes a series of natural refinements. Self-attention is attention pointed at the same sequence; multi-head attention is several attentions in parallel; the Transformer is attention with the recurrence removed entirely. So slow down on this topic — it is the conceptual hinge of the whole curriculum.
+
+## The bottleneck problem, revisited
+
+Recall the encoder-decoder model from Topic 10. An encoder reads the entire source sentence and compresses it into a single fixed-length vector, the *context vector*; the decoder then generates the target sentence from that one vector. The flaw is the compression. Forcing the meaning of a 40-word sentence through a single vector is like summarizing a paragraph in one word and asking someone to reconstruct it. Information is inevitably lost, and the longer the sentence, the worse the loss. Empirically, plain encoder-decoder translation quality fell off a cliff as sentences grew past about 20 words.
+
+The diagnosis is clear: the decoder needs access to *all* of the encoder's intermediate states, not just a single squeezed summary. But it should not treat them all equally — when generating the French word for "cat", it should focus on the source word "cat", not on the punctuation at the end. That selective focus is exactly what attention provides.
+
+## Attention intuition
+
+Here is the core idea in one sentence: **at each decoding step, compute a weighted sum of all the encoder's hidden states, where the weights say how relevant each source position is to the word currently being generated.**
+
+Concretely, the encoder no longer throws away its per-word states. It keeps `h_1, h_2, ..., h_T`, one hidden state per source token. When the decoder is about to produce the next target word, it asks: "given what I have generated so far, which source words should I look at?" It answers by scoring each source state for relevance, turning those scores into probabilities with a softmax, and building a fresh, step-specific context vector as the weighted average. Because the weights are recomputed at every step, the decoder can shift its focus across the source sentence as it goes — attending to the subject, then the verb, then the object — exactly as a human translator's eyes would.
+
+<Callout type="tip">
+The mental model: attention is a *soft, differentiable lookup*. Instead of retrieving one source state, the decoder retrieves a blend of all of them, weighted by relevance. Because it is a smooth weighted average, gradients flow through it and the relevance scoring is learned end-to-end.
+</Callout>
+
+## Additive attention (Bahdanau, 2015)
+
+The first widely-used formulation came from Bahdanau, Cho, and Bengio. Their **additive** (or "concat") attention scores the relevance of source state `h_j` to the decoder's previous state `s_{i-1}` by feeding both through a small neural network — a learned linear combination followed by a `tanh` and a final projection. The "additive" name comes from the fact that the query and key are *added* inside the `tanh` rather than multiplied.
+
+This design has a virtue: because the score is computed by a flexible little network, it can learn rich alignment patterns, and it works even when the encoder and decoder hidden sizes differ. Its drawback is speed — that small network has to run for every (decoder step, source position) pair.
+
+## Multiplicative attention (Luong, 2015)
+
+Shortly after, Luong, Pham, and Manning proposed a family of simpler, faster scoring functions, collectively **multiplicative** attention. The cheapest, the *dot* score, is just the dot product between the decoder state and each encoder state — no extra parameters at all. A slightly richer *general* variant inserts a learned weight matrix between them. Multiplicative scores are faster because dot products are a single, highly-optimized matrix multiplication, and this efficiency is exactly why the dot-product form was later chosen for the Transformer.
+
+## The Mathematics
+
+Let `s_{i-1}` be the decoder state before step `i`, and `h_j` the encoder state for source position `j`. **Bahdanau** computes an alignment score:
+
+<MathBlock
+  formula="e_{ij} = v_a^{\top} \tanh\!\left(W_a\, s_{i-1} + U_a\, h_j\right)"
+  caption="Additive (Bahdanau) alignment score: a small neural net over the decoder state and each encoder state."
+/>
+
+**Luong**'s dot variant is far simpler:
+
+<MathBlock
+  formula="\text{score}(s_i, h_j) = s_i^{\top} h_j"
+  caption="Multiplicative (Luong dot) score: just a dot product — fast, parameter-free."
+/>
+
+Either way, the raw scores are turned into a probability distribution over source positions with a softmax. These are the **attention weights**:
+
+<MathBlock
+  formula="\alpha_{ij} = \frac{\exp(e_{ij})}{\sum_{k=1}^{T} \exp(e_{ik})}"
+  caption="Attention weights: how much target step i attends to source position j; they sum to 1 over j."
+/>
+
+Finally, the step-specific **context vector** is the weighted sum of encoder states:
+
+<MathBlock
+  formula="c_i = \sum_{j=1}^{T} \alpha_{ij}\, h_j"
+  caption="The context vector for step i — a soft blend of all source states, weighted by relevance."
+/>
+
+The decoder then uses `c_i` together with its own state to predict the next word. The weight `\alpha_{ij}` has a beautiful interpretation: it is the probability that, when producing target word `i`, the model is looking at source word `j`. Collect these weights into a matrix and you get an *alignment* between source and target — often strikingly close to the word correspondences a human would draw.
+
+<Callout type="info" title="Why this was revolutionary">
+Attention removed the fixed-length bottleneck. Translation quality stopped degrading on long sentences, because the decoder could reach back to any source word at any step. The same year, attention alignments turned out to be interpretable, giving researchers a rare window into what the model was doing.
+</Callout>
+
+## Visualizing alignment
+
+Because the attention weights form a matrix — target words along one axis, source words along the other — you can plot them as a heatmap. Bright cells show strong attention. For a translation, the bright cells usually form a rough diagonal (languages with similar word order) with informative off-diagonal jumps where the languages reorder words. These plots became a standard diagnostic, and the interactive heatmap you will meet in the next topic is the same idea applied to self-attention.
+
+## Global versus local attention
+
+Luong's paper introduced a useful distinction that still matters in practice: **global** versus **local** attention. Global attention, which is what we have described so far, attends over *every* source position at every decoding step. It is simple and accurate, but its cost grows with the source length — for each target word you score all source words, so a sentence of length `T` costs on the order of `T` operations per step.
+
+**Local** attention restricts each step to a small window of source positions around a predicted alignment point, ignoring the rest. This caps the per-step cost regardless of how long the source is, which matters for very long inputs such as documents or speech. The trade-off is obvious: if the predicted window misses the relevant source word, the model cannot attend to it at all. Global attention won out for ordinary sentence-length translation because the cost was tolerable and the accuracy higher, but the local idea — limit attention to a neighborhood to control cost — reappears constantly in modern long-context models, where the quadratic cost of attending to everything becomes the central engineering problem.
+
+## Why attention beat the alternatives
+
+It is worth being explicit about *why* attention succeeded where other fixes failed, because the reasoning recurs throughout deep learning. Researchers had tried other remedies for the bottleneck: reversing the source sentence so the first words it generated were closer in the network, making the context vector bigger, or stacking more recurrent layers. Each helped a little, but none addressed the root cause — a single fixed vector simply cannot hold a variable amount of information without loss.
+
+Attention attacked the root cause directly by making the model's access to the source *content-dependent and unbounded*. Three properties made it stick. First, it is **differentiable**: the soft weighted average means gradients flow through the attention weights, so the relevance scoring is learned by ordinary backpropagation rather than hand-designed. Second, it is **interpretable**: the weights expose what the model focuses on, a rare and welcome property in deep learning. Third, and most consequentially, it turned out to be **general**: nothing about the mechanism is specific to translation, or even to two different sequences. Point attention at a single sequence and it learns relationships among that sequence's own tokens. That realization — that attention alone, without recurrence, might be enough — is what set up the leap to self-attention and, two years later, the Transformer.
+
+## A first look at queries, keys, and values
+
+The next topics reframe everything above with three words you should meet now: **query**, **key**, and **value**. The vocabulary comes from databases. A query is what you are looking *with*; keys are what you match the query *against*; values are what you actually *retrieve*. Ordinary lookup is hard — the query matches exactly one key and returns its value. Attention is the *soft* version — the query is compared to every key, the comparisons become a probability distribution, and you return a weighted blend of all the values.
+
+Map that onto Bahdanau attention and the pieces line up exactly. The decoder state `s_{i-1}` plays the role of the **query** ("what am I generating now?"). Each encoder state `h_j` serves as both a **key** (matched against the query to produce the score `e_{ij}`) and a **value** (averaged into the context vector). The alignment score is the query-key comparison; the softmax weights are the soft match; the context vector is the retrieved blend of values. Holding this query/key/value picture in mind makes the jump to self-attention almost trivial: there, a single sequence produces its own queries, keys, and values, so every token can look up relevant information from every other token. Same mechanism, pointed inward.
+
+## Code Example
+
+The snippet implements Bahdanau additive attention in PyTorch as a small module, then runs it once and inspects the resulting attention weights, confirming they form a valid probability distribution over the source positions.
+
+<CodeBlock lang="python" filename="bahdanau_attention.py" code={`# bahdanau_attention.py
+# pip install torch
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class BahdanauAttention(nn.Module):
+    def __init__(self, dec_dim, enc_dim, attn_dim):
+        super().__init__()
+        self.W = nn.Linear(dec_dim, attn_dim, bias=False)   # over decoder state
+        self.U = nn.Linear(enc_dim, attn_dim, bias=False)   # over encoder states
+        self.v = nn.Linear(attn_dim, 1, bias=False)         # to a scalar score
+
+    def forward(self, s_prev, enc_states):
+        # s_prev:     (batch, dec_dim)        decoder state s_{i-1}
+        # enc_states: (batch, T, enc_dim)     all encoder states h_1..h_T
+        scores = self.v(torch.tanh(
+            self.W(s_prev).unsqueeze(1) + self.U(enc_states)
+        )).squeeze(-1)                         # (batch, T) alignment scores e_ij
+        alpha = F.softmax(scores, dim=1)       # (batch, T) attention weights
+        context = torch.bmm(alpha.unsqueeze(1), enc_states).squeeze(1)
+        return context, alpha                  # c_i and the weights
+
+torch.manual_seed(0)
+batch, T, enc_dim, dec_dim = 1, 5, 8, 6
+attn = BahdanauAttention(dec_dim, enc_dim, attn_dim=10)
+
+s_prev = torch.randn(batch, dec_dim)           # current decoder state
+enc_states = torch.randn(batch, T, enc_dim)    # 5 source words
+context, alpha = attn(s_prev, enc_states)
+
+print("attention weights:", alpha.detach().numpy().round(3))
+print("weights sum to:   ", float(alpha.sum()))   # -> 1.0
+print("context shape:    ", tuple(context.shape)) # -> (1, 8)
+
+# Expected (values vary with seed):
+# attention weights: [[0.13 0.31 0.07 0.22 0.27]]
+# weights sum to:    1.0
+# context shape:     (1, 8)
+`} />
+
+The weights sum to exactly 1 — they are a genuine probability distribution over the five source positions — and the context vector lives in the encoder's dimension because it is a blend of encoder states. Swap the additive scoring for a dot product and you have Luong attention; swap the decoder state for a projection of the *same* sequence and you have self-attention, the subject of the next topic.
+
+<PaperLink
+  title="Neural Machine Translation by Jointly Learning to Align and Translate"
+  authors="Bahdanau, Cho, Bengio"
+  year={2015}
+  venue="ICLR"
+  url="https://arxiv.org/abs/1409.0473"
+/>
+
+<KeyTakeaways phase={2}>
+- The encoder-decoder **bottleneck** — squeezing a whole sentence into one vector — degrades badly on long inputs; attention removes it.
+- **Attention computes a step-specific context vector** as a weighted sum of all encoder states, with weights set by a learned relevance score.
+- **Bahdanau (additive)** scores with a small neural net (query + key inside a tanh); **Luong (multiplicative/dot)** scores with a dot product — simpler and faster.
+- A **softmax** turns scores into attention weights that sum to 1; the weight α_ij is the probability target step i attends to source position j.
+- Attention weights form an **interpretable alignment matrix** between source and target.
+- Attention is a **soft, differentiable lookup** — and the dot-product form is the seed of self-attention and the Transformer.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What does the attention weight α_ij represent?",
+    options: ["The length of source word j", "How much target step i attends to source position j", "The embedding of word j", "The decoder's final output"],
+    correctIndex: 1,
+    explanation: "α_ij is the softmax-normalized relevance of source position j when generating target word i — effectively the probability the model is 'looking at' source word j at that step."
+  },
+  {
+    question: "What is the main difference between Bahdanau and Luong (dot) attention?",
+    options: ["Bahdanau is for images, Luong for text", "Bahdanau scores with a small neural net (additive); Luong dot scores with a dot product (multiplicative)", "They use different vocabularies", "Luong has no softmax"],
+    correctIndex: 1,
+    explanation: "Bahdanau adds query and key inside a tanh network (additive); Luong's dot form multiplies them directly. The dot-product approach is faster and was adopted by the Transformer."
+  },
+  {
+    question: "Why did attention improve translation of long sentences specifically?",
+    options: ["It made the model smaller", "It removed the fixed-length context bottleneck, letting the decoder reach any source word", "It removed the softmax", "It used a larger vocabulary"],
+    correctIndex: 1,
+    explanation: "Without attention, all source information is crammed into one fixed vector that overflows on long sentences. Attention lets the decoder build a fresh context from all source states at every step."
+  }
+]} />
+
+## What's Next
+
+Bahdanau and Luong attention still ride on top of an RNN: the decoder attends to the encoder, but each still processes its sequence step by step. The next leap is to ask — what if a sequence attended to *itself*, with no recurrence at all? In **Scaled Dot-Product Self-Attention**, we turn attention inward and uncover the operation at the heart of every Transformer.

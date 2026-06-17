@@ -1,0 +1,193 @@
+---
+title: "RLHF — Reward Modeling & PPO"
+subtitle: "Aligning LLMs to human preferences with reinforcement learning"
+phase: 3
+topicNumber: 26
+slug: "rlhf"
+readingTime: 17
+prerequisites: ["instruction-tuning-flan"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('rlhf');
+
+<TopicHero topic={topic} />
+
+Instruction tuning teaches a model to follow instructions, but it cannot teach what it means to follow them *well*. When several responses are all grammatical and on-topic, which is most helpful, honest, and harmless? Those qualities are hard to specify with a loss function but easy for humans to judge by comparison. **Reinforcement Learning from Human Feedback (RLHF)** is the technique that turns those human judgments into a training signal, and it is what transformed raw GPT-3 into ChatGPT. This topic walks through the full three-stage RLHF pipeline, derives its two key losses, and confronts its notorious failure mode, reward hacking.
+
+RLHF is conceptually rich because it combines supervised learning, a learned reward model, and reinforcement learning into one pipeline. We will take it stage by stage, and the next topic (DPO) will show a simpler alternative that achieves the same goal without the reinforcement learning.
+
+## The alignment problem
+
+A pre-trained, even instruction-tuned, model optimizes a proxy — next-token likelihood, or imitation of demonstrations — not the thing we actually want, which is to be helpful, honest, and harmless. These human values resist direct specification: you cannot write a differentiable loss for "helpfulness." But humans can easily *compare* two responses and say which is better. RLHF exploits exactly this: collect human preference comparisons, distill them into a learned **reward model**, and then optimize the language model to maximize that reward. It converts fuzzy human values into a numeric signal the model can be trained against.
+
+## The three-stage pipeline
+
+RLHF has three stages, run in order:
+
+1. **Supervised Fine-Tuning (SFT)** — instruction-tune the pre-trained model on high-quality demonstrations (Topic 25). This produces a competent starting policy.
+2. **Reward Model (RM) training** — collect human preferences over pairs of model responses and train a model to predict which response a human would prefer, outputting a scalar reward.
+3. **RL fine-tuning** — use reinforcement learning (PPO) to update the language model so it generates responses the reward model scores highly, while staying close to the SFT model.
+
+## Stage 2: the reward model and Bradley-Terry
+
+To train the reward model, humans are shown a prompt and two responses and asked which they prefer. This yields a dataset of (prompt, preferred response, rejected response) triples. The reward model — usually the SFT model with a scalar output head — is trained so that it assigns a *higher* score to the preferred response than to the rejected one. The mathematics uses the **Bradley-Terry** model of pairwise preference, which says the probability a human prefers response A over B is the logistic of the difference in their rewards.
+
+## Stage 3: PPO and the KL penalty
+
+With a reward model in hand, the language model (the "policy") is fine-tuned with **Proximal Policy Optimization (PPO)**, a reinforcement-learning algorithm. The policy generates responses, the reward model scores them, and PPO nudges the policy to make high-reward responses more likely. PPO is "proximal" because it constrains each update to stay close to the previous policy, preventing destabilizing jumps.
+
+A crucial extra term is the **KL-divergence penalty**. Left unconstrained, the policy will drift far from the SFT model to chase reward, producing degenerate text that games the reward model while abandoning fluency. The KL penalty punishes the policy for diverging from the SFT reference distribution, keeping generations fluent and on-distribution. It is the leash that keeps reward optimization from going off a cliff.
+
+<Callout type="warning" title="The KL penalty is essential">
+Without the KL term, RLHF reliably produces 'reward-hacked' gibberish — text that scores high on the imperfect reward model but is useless to humans. The penalty anchors the policy near the SFT model, trading a little reward for staying coherent.
+</Callout>
+
+## The Mathematics
+
+The reward model is trained with a pairwise loss derived from Bradley-Terry. For a prompt `x` with preferred (winning) response `y_w` and rejected (losing) response `y_l`, with reward model `r`:
+
+<MathBlock
+  formula="\mathcal{L}_{\text{RM}} = -\log \sigma\big(r(x, y_w) - r(x, y_l)\big)"
+  caption="Reward-model loss: maximize the gap between preferred and rejected response scores (σ is the logistic function)."
+/>
+
+The RL stage then maximizes expected reward minus a KL penalty against the reference (SFT) policy `π_ref`:
+
+<MathBlock
+  formula="\max_{\pi_\theta}\; \mathbb{E}_{x,\, y \sim \pi_\theta}\big[\, r(x, y)\,\big] - \beta \, \text{KL}\big(\pi_\theta(y \mid x)\,\|\,\pi_{\text{ref}}(y \mid x)\big)"
+  caption="RLHF objective: maximize reward while staying close (in KL) to the SFT reference; β controls the trade-off."
+/>
+
+The coefficient `β` tunes the leash: small `β` lets the policy chase reward aggressively (risking reward hacking), large `β` keeps it tightly anchored to the SFT model (limiting how much it can improve). Tuning `β` is one of the finicky parts of RLHF.
+
+## Reward hacking and over-optimization
+
+The reward model is only an *approximation* of human preference, and any approximation can be gamed. **Reward hacking** (or reward over-optimization) is when the policy finds responses that score high on the reward model but that humans actually dislike — exploiting the reward model's blind spots. A classic symptom: RLHF models often become excessively verbose or sycophantic, because the reward model slightly favours longer or more agreeable answers, and the policy ruthlessly amplifies that bias. The KL penalty and early stopping mitigate over-optimization, but it remains a fundamental limitation: you are optimizing a proxy of a proxy of human values.
+
+## InstructGPT: RLHF in practice
+
+OpenAI's **InstructGPT** (Ouyang et al. 2022) applied this exact pipeline to GPT-3 and produced the template for ChatGPT. The aligned model was preferred by human raters over raw GPT-3 despite being far smaller, was more truthful, and generated less toxic output. RLHF, more than scale, is what made GPT-3 into a usable assistant — the strongest evidence that alignment is a distinct and essential ingredient.
+
+## Limitations
+
+RLHF is powerful but costly and fragile. It requires expensive human preference labelling; the multi-model PPO setup (policy, reward model, reference, value function) is complex and memory-hungry; PPO is notoriously finicky to tune; and reward hacking is ever-present. It can also induce **mode collapse** (less diverse outputs) and amplify the biases of the human labellers. These pain points are exactly what motivated the simpler DPO method in the next topic.
+
+## Collecting preference data
+
+The quality of RLHF rests entirely on the quality of its human preference data, so it is worth understanding how that data is gathered. A prompt is sampled, the current model generates two (or more) candidate responses, and human annotators rank them — often a simple "which is better, A or B?" comparison, sometimes a full ranking of several candidates. Comparisons are used rather than absolute scores because humans are far more reliable at relative judgments ("B is better than A") than at absolute ones ("A is a 7 out of 10"), where ratings drift and differ between annotators.
+
+This sounds simple but is operationally hard. Annotators must be trained and calibrated, given clear guidelines about what "better" means (more helpful? more honest? safer?), and monitored for agreement, because humans disagree about preferences surprisingly often. Disagreement sets a ceiling on how good the reward model can be: if labellers only agree 70% of the time, the reward model cannot exceed that signal. The guidelines themselves encode values and inevitably reflect the preferences of whoever wrote them, which is one route by which a lab's judgments and biases enter the final model. Collecting good preference data is expensive, slow, and judgment-laden, and these costs — not the algorithm — are often the real bottleneck of RLHF, which is part of why methods that reduce the human-labelling burden became so attractive.
+
+## Why reinforcement learning and not plain supervision?
+
+A natural question: if we have preference data, why not just supervise the model to imitate the preferred responses directly, as in instruction tuning? The answer reveals what RL buys. Supervised fine-tuning on preferred responses teaches the model to imitate *those specific good answers*, but it never teaches the model what makes them good *relative to alternatives*, and it cannot push the model away from bad-but-plausible responses it might otherwise generate. RL, guided by a reward model, optimizes over the model's *own* generations — it can explore responses the model actually produces and shape the whole distribution, rewarding the good and penalizing the bad, including failure modes no human demonstration covered.
+
+In other words, supervision can only pull the model toward examples it is shown, while RL can also push it away from its own undesirable tendencies and reward qualities that emerge across many samples. That said, the gap is smaller than it first appears, and the next topic's central insight is precisely that the preference signal can be turned into a *supervised-style* loss that captures much of what RL provides — without the instability and machinery of an RL loop. The fact that RLHF and DPO can reach similar destinations by very different routes is one of the more elegant results in modern alignment, and understanding *why* RL was thought necessary makes it easier to appreciate why removing it was such a welcome simplification.
+
+## Constitutional AI and RLAIF: reducing the human burden
+
+Because human preference labelling is the costly bottleneck, a major line of work replaces some human feedback with *AI* feedback. **RLAIF** (Reinforcement Learning from AI Feedback) uses a capable model, rather than humans, to express the preferences that train the reward model, dramatically cutting labelling cost. Anthropic's **Constitutional AI** is the best-known instance and the approach behind the Claude models: instead of humans labelling for harmlessness, the model critiques and revises its own responses against a written set of principles — a "constitution" — and those self-revisions and AI-judged comparisons supply the alignment signal.
+
+The appeal is scalability and consistency: an AI judge can label millions of comparisons cheaply and applies the written principles uniformly, whereas human labellers are expensive and variable. The risk is that the AI feedback inherits the judge model's own biases and blind spots, so the constitution and the judge must be chosen carefully, and human oversight remains in the loop for the values that matter most. These AI-feedback methods do not abandon the RLHF structure you have learned — there is still a preference signal, a reward (or implicit reward), and an optimization toward it — they simply change *where the preferences come from*. They are a direct response to the limitation that human feedback is the part of RLHF that does not scale, and they are central to how modern frontier assistants are aligned at the scale they operate.
+
+## Code Example
+
+The code trains a reward model on preference pairs and sketches a PPO step using HuggingFace's TRL library, which packages the RLHF machinery.
+
+<CodeBlock lang="python" filename="rlhf_demo.py" code={`# rlhf_demo.py
+# pip install trl transformers torch
+import torch
+import torch.nn.functional as F
+
+# --- Stage 2: reward-model loss (Bradley-Terry), from scratch ---
+# Imagine a reward model that scored a winning and losing response:
+r_win  = torch.tensor([2.1, 0.4, 1.8])   # rewards for preferred responses
+r_lose = torch.tensor([0.3, 0.1, 1.9])   # rewards for rejected responses
+
+rm_loss = -F.logsigmoid(r_win - r_lose).mean()
+print("reward-model loss:", round(rm_loss.item(), 3))
+# Lower loss <=> the RM scores preferred responses higher than rejected ones.
+
+# --- Stage 3 sketch with TRL's PPOTrainer (high level) ---
+# from trl import PPOTrainer, PPOConfig, AutoModelForCausalLMWithValueHead
+# from transformers import AutoTokenizer
+#
+# config = PPOConfig(model_name="gpt2", learning_rate=1e-5, init_kl_coef=0.2)
+# policy = AutoModelForCausalLMWithValueHead.from_pretrained("gpt2")
+# ref    = AutoModelForCausalLMWithValueHead.from_pretrained("gpt2")  # frozen
+# ppo    = PPOTrainer(config, policy, ref, tokenizer)
+#
+# for batch in dataloader:
+#     responses = ppo.generate(batch["query_ids"])        # policy acts
+#     rewards   = reward_model(batch["query"], responses) # RM scores
+#     ppo.step(batch["query_ids"], responses, rewards)    # PPO update + KL
+#
+# The KL penalty (init_kl_coef) keeps the policy near the frozen reference.
+
+# Demonstrate the KL intuition numerically
+ref_logp    = torch.tensor(-2.0)   # reference log-prob of a token
+policy_logp = torch.tensor(-1.0)   # policy log-prob (drifted higher)
+kl_term = policy_logp - ref_logp   # per-token KL contribution
+print("per-token KL drift:", round(kl_term.item(), 3))
+
+# Expected:
+# reward-model loss: ~0.35
+# per-token KL drift: 1.0
+`} />
+
+The reward-model loss is the Bradley-Terry formula made executable: it shrinks only when preferred responses outscore rejected ones, exactly the human-preference signal we want to instill. The PPO sketch shows the loop — generate, score, update — with the KL coefficient anchoring the policy to a frozen reference so it cannot reward-hack its way into gibberish. This pipeline aligned ChatGPT; the next topic shows how DPO achieves the same alignment with a single loss and no RL loop.
+
+<PaperLink
+  title="Training Language Models to Follow Instructions with Human Feedback (InstructGPT)"
+  authors="Ouyang, Wu, Jiang, et al."
+  year={2022}
+  venue="NeurIPS"
+  url="https://arxiv.org/abs/2203.02155"
+/>
+
+<KeyTakeaways phase={3}>
+- RLHF turns **human preference comparisons** into a training signal for qualities (helpful, honest, harmless) that resist direct specification.
+- It has **three stages**: SFT (demonstrations), reward-model training (preferences), and RL fine-tuning with PPO.
+- The **reward model** is trained with a **Bradley-Terry** pairwise loss to score preferred responses above rejected ones.
+- **PPO** optimizes the policy for high reward while a **KL penalty** keeps it close to the SFT reference — essential to prevent reward-hacked gibberish.
+- **Reward hacking** (over-optimizing an imperfect reward model) causes verbosity and sycophancy; it is a fundamental limitation.
+- **InstructGPT** proved RLHF makes a smaller model more useful than a larger raw one — but RLHF is costly, complex, and finicky (motivating DPO).
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What is the KL penalty in RLHF and why is it necessary?",
+    options: ["It speeds up training", "It penalizes the policy for drifting from the SFT reference, preventing reward-hacked, degenerate outputs", "It increases the reward", "It removes the reward model"],
+    correctIndex: 1,
+    explanation: "The KL-divergence penalty keeps the optimized policy close to the SFT reference distribution. Without it, the policy chases the imperfect reward model into incoherent text that scores high but is useless to humans."
+  },
+  {
+    question: "What does the reward model learn to do?",
+    options: ["Generate responses", "Predict which of two responses a human would prefer, outputting a scalar reward (via a Bradley-Terry loss)", "Tokenize text", "Translate languages"],
+    correctIndex: 1,
+    explanation: "The reward model is trained on human preference pairs to assign a higher scalar score to the preferred response than the rejected one, distilling human judgments into a reward signal for RL."
+  },
+  {
+    question: "What is 'reward hacking' in RLHF?",
+    options: ["Stealing the reward model", "The policy exploiting the reward model's blind spots to get high scores on outputs humans actually dislike", "Training without a reward model", "Using too small a model"],
+    correctIndex: 1,
+    explanation: "Because the reward model only approximates human preference, the policy can over-optimize it — producing verbose or sycophantic responses that score high but are not genuinely better."
+  }
+]} />
+
+## What's Next
+
+RLHF works but is complex, unstable, and expensive. What if you could achieve the same preference alignment with a single supervised loss and no reinforcement learning at all? In **DPO — Direct Preference Optimization**, we study the elegant method that did exactly that and largely replaced PPO for open models.

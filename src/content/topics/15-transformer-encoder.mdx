@@ -1,0 +1,214 @@
+---
+title: "Transformer Encoder"
+subtitle: "The BERT side — encoding bidirectional context"
+phase: 2
+topicNumber: 15
+slug: "transformer-encoder"
+readingTime: 14
+prerequisites: ["multi-head-attention", "positional-encoding"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+
+export const topic = getTopicBySlug('transformer-encoder');
+
+<TopicHero topic={topic} />
+
+You now hold every part needed to build a Transformer: self-attention to relate tokens, multi-head attention to relate them in several ways at once, and positional encoding to restore word order. This topic snaps those parts together into the **Transformer encoder** — the stack of identical layers that reads an input sequence and produces a contextualized representation of every token. It is the "understanding" half of the architecture, and on its own it constitutes the entire BERT family of models.
+
+We will dissect a single encoder layer into its two sublayers, explain the two unsung heroes that make deep Transformers trainable — residual connections and layer normalization — and look at the position-wise feed-forward network that does much of the model's heavy lifting. Then we will stack the layers, run a forward pass in PyTorch, and you will have built a working encoder from scratch.
+
+## Encoder structure
+
+A Transformer encoder is a stack of `N` **identical layers** (the original paper used `N = 6`; BERT-base uses 12, BERT-large 24). Each layer takes a sequence of vectors and returns a sequence of vectors of the same shape, progressively enriching each token's representation with context from the rest of the sequence. Because every layer has the same structure, describing one describes them all.
+
+The input to the stack is the token embeddings with positional encoding added. The output is a sequence of *contextualized* embeddings: a vector for each token that now reflects its meaning *in this particular sentence*. The word "bank" enters with a single generic embedding and leaves, after several layers, with a representation shaped by whether the surrounding words were about rivers or money.
+
+## Inside one encoder layer
+
+Each encoder layer contains exactly two sublayers, applied in order:
+
+1. **Multi-head self-attention** — lets every token gather information from every other token (Topic 13).
+2. **Position-wise feed-forward network (FFN)** — a small neural network applied to each token's vector independently.
+
+Around *each* of these two sublayers sits the same wrapper: a residual connection followed by layer normalization, written "Add & Norm." So the full data path through a layer is: self-attention, Add & Norm, feed-forward, Add & Norm. That is the entire layer.
+
+## Add & Norm: residual connections and layer normalization
+
+The "Add & Norm" wrapper is what makes it possible to stack many layers without the network becoming untrainable, so it deserves real attention.
+
+A **residual connection** (or skip connection) adds a sublayer's *input* to its *output*: instead of passing along `Sublayer(x)`, the layer passes along `x + Sublayer(x)`. This means each sublayer only has to learn a *modification* to its input rather than recompute everything from scratch. The deeper benefit is for gradients: during backpropagation, the `+x` term provides a direct path for gradients to flow backward through the network, sidestepping the vanishing-gradient problem that otherwise plagues deep stacks. Residual connections, borrowed from ResNets in computer vision, are arguably the single trick that makes very deep networks trainable at all.
+
+**Layer normalization** then standardizes the summed result: for each token's vector, it subtracts the mean and divides by the standard deviation across the feature dimension, then applies a learned scale and shift. This keeps the activations at a stable scale as they pass through many layers, which speeds and stabilizes training. Unlike batch normalization, layer norm operates per token and does not depend on the batch, making it ideal for variable-length sequences.
+
+<Callout type="warning" title="Why residuals matter">
+Without residual connections, stacking 12 or 24 attention layers would be nearly impossible to optimize — gradients would vanish long before reaching the early layers. The humble '+x' is what lets Transformers be deep.
+</Callout>
+
+## The position-wise feed-forward network
+
+The second sublayer, the FFN, is easy to overlook but does a large share of the model's computation. It is a small two-layer network applied **independently and identically to each token position**: expand the vector from `d_model` to a larger hidden size `d_ff`, apply a non-linearity (ReLU in the original, GELU in most modern models), then project back down to `d_model`. The expansion is typically 4×: with `d_model = 512`, `d_ff = 2048`.
+
+If attention is where tokens *exchange* information, the FFN is where each token *processes* the information it gathered. The expansion to `d_ff` gives the model room to compute non-linear features per token. In fact, in large language models the FFN sublayers hold the *majority* of the parameters — far more than the attention sublayers — and recent interpretability work suggests they function partly as a key-value memory storing factual associations.
+
+## Pre-norm versus post-norm
+
+A subtle but important detail: where exactly does layer norm go? The original Transformer used **post-norm**: `LayerNorm(x + Sublayer(x))` — normalize after adding. This works but can be unstable to train deeply, often requiring a learning-rate warmup. Most modern Transformers use **pre-norm**: `x + Sublayer(LayerNorm(x))` — normalize the input *before* the sublayer. Pre-norm keeps a clean residual path and trains more stably at great depth, which is why nearly all large language models adopt it. We will present the original post-norm formula below, but be aware the modern default has flipped.
+
+## The Mathematics
+
+A sublayer wrapped in residual-and-norm (post-norm form) is:
+
+<MathBlock
+  formula="\text{LayerNorm}\big(x + \text{Sublayer}(x)\big)"
+  caption="Add & Norm: residual connection followed by layer normalization."
+/>
+
+Layer normalization itself, over a vector `x` with mean `μ` and standard deviation `σ` across its features, with learned scale `γ` and shift `β`:
+
+<MathBlock
+  formula="\text{LayerNorm}(x) = \gamma \odot \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta"
+  caption="Standardize per-token across features, then apply a learned scale and shift."
+/>
+
+And the position-wise feed-forward network, with weights `W_1, W_2` and the ReLU non-linearity:
+
+<MathBlock
+  formula="\text{FFN}(x) = \max(0,\; x W_1 + b_1)\, W_2 + b_2"
+  caption="Expand to d_ff, apply ReLU, project back to d_model — applied to each token independently."
+/>
+
+Putting it together, one encoder layer maps input `x` to `LayerNorm(a + FFN(a))` where `a = LayerNorm(x + \text{SelfAttention}(x))`. Stack `N` of these and you have the encoder.
+
+## What the encoder produces, and how it is used
+
+It is worth being concrete about the encoder's output and what people do with it. After the final layer, you have one contextualized vector per input token. There are two common ways to consume them.
+
+For **token-level tasks** — named-entity recognition, part-of-speech tagging, extractive question answering — you attach a small classifier on top of *each* token's output vector and predict a label per token. The contextualization is what makes this work: the vector for "Washington" already encodes whether the surrounding words point to the person, the city, or the state.
+
+For **sequence-level tasks** — sentiment, topic classification, sentence-pair matching — you need a single vector for the whole input. BERT solves this by prepending a special `[CLS]` token to every input; its final-layer vector is trained to summarize the entire sequence, and a classifier reads from it. Alternatively, one can mean-pool all token vectors. Either way, the encoder turns variable-length text into fixed-size, meaning-rich representations, which is exactly why encoder models became the backbone of search, retrieval, and classification.
+
+## Stacking: why depth helps
+
+Why stack `N` layers instead of using one big one? Because each layer can only mix information one "hop" through attention, but stacking lets information compose. Early layers tend to capture surface and syntactic features — which words attend to their neighbours, simple agreement. Middle layers capture more abstract syntax and phrase structure. Later layers capture semantics and task-relevant abstractions. This rough progression, observed by probing BERT's layers, mirrors how convolutional networks build from edges to objects in vision.
+
+Depth also increases the model's capacity to represent compositional meaning. A single attention layer can link "it" to "animal," but understanding *why* requires combining that link with the predicate "tired," which a second layer can do by attending over the first layer's enriched representations. Each additional layer composes relationships discovered below it. There are diminishing returns and practical limits — very deep Transformers need careful normalization and residual scaling to train — but within reason, more layers buy more abstraction, which is one axis along which models are scaled up.
+
+## Dropout and other training details
+
+Two more ingredients appear in every real encoder, included in the code below. **Dropout** randomly zeroes a fraction of activations during training, a regularizer that prevents the model from over-relying on any single pathway; it is applied to attention weights and to sublayer outputs. **Embedding scaling** multiplies the input embeddings by the square root of `d_model` before adding positional encodings, so that the content signal is not swamped by the positional one. These details are easy to skip when learning the architecture, but they matter for getting a model to actually train well, and you will see them in production implementations. The architecture is the skeleton; dropout, normalization, scaling, and a sensible learning-rate schedule are the connective tissue that lets the skeleton stand up.
+
+## Where the encoder fits in the family of models
+
+The encoder you are building is one of three architectural templates, and seeing the map now prevents confusion later. **Encoder-only** models — BERT, RoBERTa, DeBERTa — use exactly the stack described here. Every token attends to every other token in both directions, so the representations are bidirectional. This is ideal for *understanding* tasks where the whole input is available at once, but such models cannot generate text fluently, because generation needs to produce tokens left to right without seeing the future.
+
+**Decoder-only** models — GPT, LLaMA, and most large language models — use a similar stack but with *masked* self-attention so each token sees only itself and the tokens before it. That causal restriction is what enables autoregressive generation, the subject of the next two topics. **Encoder-decoder** models — the original Transformer, T5, BART — use both: an encoder builds a bidirectional representation of the input, and a decoder generates the output while attending to that representation through cross-attention. These suit sequence-to-sequence tasks like translation and summarization.
+
+The crucial insight is that all three are built from the *same Lego bricks* you have now assembled: multi-head attention, feed-forward networks, residual connections, and layer normalization. The difference is only in *how attention is masked* and *whether there are one or two stacks*. An encoder uses unmasked self-attention; a decoder adds a causal mask and a cross-attention sublayer. Internalizing that the encoder and decoder share almost all their machinery makes the next topic — which adds just two modifications to what you have here — feel less like new material and more like a small, logical edit. The Transformer's power comes not from many different components but from stacking a few simple ones, deeply and with the right masks.
+
+## Code Example
+
+The code builds a single encoder layer — multi-head self-attention and an FFN, each wrapped in residual-plus-layer-norm — then stacks several into a full encoder and runs a forward pass.
+
+<CodeBlock lang="python" filename="transformer_encoder.py" code={`# transformer_encoder.py
+# pip install torch
+import torch
+import torch.nn as nn
+
+class EncoderLayer(nn.Module):
+    def __init__(self, d_model, n_heads, d_ff, dropout=0.1):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
+        self.ff = nn.Sequential(
+            nn.Linear(d_model, d_ff), nn.ReLU(),
+            nn.Linear(d_ff, d_model),
+        )
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x):
+        # Sublayer 1: self-attention + Add & Norm
+        a, _ = self.attn(x, x, x)               # Q = K = V = x  (self-attention)
+        x = self.norm1(x + self.drop(a))
+        # Sublayer 2: feed-forward + Add & Norm
+        f = self.ff(x)
+        x = self.norm2(x + self.drop(f))
+        return x
+
+class Encoder(nn.Module):
+    def __init__(self, d_model, n_heads, d_ff, n_layers):
+        super().__init__()
+        self.layers = nn.ModuleList(
+            [EncoderLayer(d_model, n_heads, d_ff) for _ in range(n_layers)]
+        )
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+torch.manual_seed(0)
+d_model, n_heads, d_ff, n_layers, seq = 512, 8, 2048, 6, 10
+enc = Encoder(d_model, n_heads, d_ff, n_layers)
+x = torch.randn(1, seq, d_model)        # 10 tokens (embeddings + positional)
+out = enc(x)
+
+print("layers:", n_layers, " d_ff:", d_ff)
+print("input shape: ", tuple(x.shape))
+print("output shape:", tuple(out.shape))   # same shape, but contextualized
+n_params = sum(p.numel() for p in enc.parameters())
+print("encoder parameters:", f"{n_params:,}")
+
+# Expected:
+# layers: 6  d_ff: 2048
+# input shape:  (1, 10, 512)
+# output shape: (1, 10, 512)
+# encoder parameters: 18,914,304
+`} />
+
+The output has the same shape as the input — one vector per token — but those vectors are now contextualized, each having absorbed information from the whole sequence across six layers. Note the parameter count: a modest 6-layer encoder already has ~19 million parameters, most of them in the feed-forward sublayers, which is a preview of how Transformers grow into the billions.
+
+<KeyTakeaways phase={2}>
+- The encoder is a stack of **N identical layers**; each maps a sequence of vectors to a same-shape sequence of *contextualized* vectors.
+- Each layer has **two sublayers**: multi-head self-attention (tokens exchange info) and a position-wise feed-forward network (each token processes info).
+- **Residual connections** (`x + Sublayer(x)`) give gradients a direct path, making deep stacks trainable; **layer normalization** stabilizes activation scale.
+- The **FFN** expands to `d_ff` (≈4×), applies a non-linearity, and projects back; it holds most of the model's parameters.
+- **Pre-norm** (normalize before the sublayer) has largely replaced the original **post-norm** for stable deep training.
+- An encoder produces bidirectional context for every token — this is exactly the BERT architecture.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What is the purpose of residual (skip) connections in a Transformer layer?",
+    options: ["To reduce the number of parameters", "To give gradients a direct path backward, enabling deep stacks to train", "To replace the softmax", "To add positional information"],
+    correctIndex: 1,
+    explanation: "Residual connections add a sublayer's input to its output (x + Sublayer(x)). The '+x' term lets gradients flow directly backward, avoiding the vanishing-gradient problem in deep networks."
+  },
+  {
+    question: "What are the two sublayers in a Transformer encoder layer?",
+    options: ["Two attention layers", "Multi-head self-attention and a position-wise feed-forward network", "An encoder and a decoder", "Embedding and softmax"],
+    correctIndex: 1,
+    explanation: "Each encoder layer has multi-head self-attention (tokens exchange information) followed by a position-wise FFN (each token processes its information), each wrapped in Add & Norm."
+  },
+  {
+    question: "What does the position-wise feed-forward network do?",
+    options: ["Mixes information across tokens", "Applies a two-layer MLP (expand to d_ff, non-linearity, project back) to each token independently", "Computes attention weights", "Normalizes the batch"],
+    correctIndex: 1,
+    explanation: "The FFN is applied independently to each token's vector: expand from d_model to d_ff, apply a non-linearity, project back. It processes per-token features and holds most of the model's parameters."
+  }
+]} />
+
+## What's Next
+
+The encoder reads a whole sequence at once and sees in both directions. But generation must produce one token at a time, without peeking at the future. In **Transformer Decoder**, we add masked self-attention and cross-attention to build the generative half of the architecture — the GPT side.

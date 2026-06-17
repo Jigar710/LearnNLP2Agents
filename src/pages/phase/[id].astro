@@ -1,0 +1,104 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Badge from '../../components/ui/Badge.astro';
+import { PHASES, getTopicsByPhase, getPhase } from '../../data/curriculum';
+import { withBase } from '../../utils/base';
+
+export function getStaticPaths() {
+  return PHASES.map((p) => ({ params: { id: String(p.id) } }));
+}
+
+const { id } = Astro.params;
+const phase = getPhase(Number(id))!;
+const topics = getTopicsByPhase(phase.id);
+const num = (n: number) => String(n).padStart(2, '0');
+const prevPhase = getPhase(phase.id - 1);
+---
+<BaseLayout title={`Phase ${phase.id}: ${phase.title}`} description={phase.subtitle} accent={phase.cssVar}>
+  <div class="phase-page" style={`--accent: ${phase.color}`}>
+    <header class="phase-hero">
+      <span class="phase-hero-num">Phase {phase.id} of {PHASES.length}</span>
+      <h1 class="phase-hero-title">{phase.title}</h1>
+      <p class="phase-hero-desc">{phase.description}</p>
+      <div class="phase-hero-meta">
+        <span>{phase.topicCount} topics</span>
+        <a class="phase-hero-start" href={withBase(`/topic/${topics[0].slug}`)}>Start Phase {phase.id} →</a>
+      </div>
+    </header>
+
+    <section class="phase-block">
+      <h2 class="phase-h2">Topics</h2>
+      <div class="topic-cards">
+        {topics.map((t) => (
+          <a class="topic-card" href={withBase(`/topic/${t.slug}`)}>
+            <div class="topic-card-head">
+              <span class="topic-card-num">{num(t.id)}</span>
+              <span class="topic-card-time">{t.readingTime} min</span>
+            </div>
+            <h3 class="topic-card-title">{t.title}</h3>
+            <p class="topic-card-sub">{t.subtitle}</p>
+            <div class="topic-card-tags">
+              {t.hasCode && <Badge phase={phase.id} label="Code" size="sm" />}
+              {t.hasMath && <Badge phase={phase.id} label="Math" size="sm" />}
+              {t.hasInteractiveDemo && <Badge phase={phase.id} label="Demo" size="sm" />}
+            </div>
+          </a>
+        ))}
+      </div>
+    </section>
+
+    <section class="phase-block">
+      <h2 class="phase-h2">What you'll learn</h2>
+      <ul class="phase-skills">
+        {phase.skills.map((s) => <li>{s}</li>)}
+      </ul>
+    </section>
+
+    {prevPhase && (
+      <section class="phase-block">
+        <h2 class="phase-h2">Prerequisites</h2>
+        <p class="phase-prereq">
+          This phase assumes you've worked through
+          <a href={withBase(`/phase/${prevPhase.id}`)}> Phase {prevPhase.id}: {prevPhase.title}</a>.
+          Comfort with the earlier material will make these topics click faster.
+        </p>
+      </section>
+    )}
+
+    <nav class="phase-nav">
+      {prevPhase ? <a href={withBase(`/phase/${prevPhase.id}`)}>← Phase {prevPhase.id}</a> : <span />}
+      {getPhase(phase.id + 1) ? <a href={withBase(`/phase/${phase.id + 1}`)}>Phase {phase.id + 1} →</a> : <a href={withBase('/curriculum')}>Full curriculum →</a>}
+    </nav>
+  </div>
+</BaseLayout>
+
+<style>
+  .phase-page { max-width: 1000px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+  .phase-hero { border-left: 4px solid var(--accent); padding-left: 1.2rem; margin-bottom: 2.5rem; }
+  .phase-hero-num { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); }
+  .phase-hero-title { font-family: var(--font-serif); font-weight: 400; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.1; margin: 0.4rem 0; }
+  .phase-hero-desc { color: var(--text-secondary); line-height: 1.6; max-width: 68ch; margin: 0 0 1rem; }
+  .phase-hero-meta { display: flex; align-items: center; gap: 1.2rem; font-size: 0.9rem; color: var(--text-muted); }
+  .phase-hero-start { font-weight: 600; color: var(--accent); }
+
+  .phase-block { margin-bottom: 2.5rem; }
+  .phase-h2 { font-size: 1.3rem; font-weight: 600; margin: 0 0 1rem; }
+  .topic-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
+  .topic-card { display: flex; flex-direction: column; padding: 1.1rem; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-secondary); color: var(--text-primary); transition: transform 150ms ease, border-color 150ms ease; }
+  .topic-card:hover { transform: translateY(-2px); border-color: var(--accent); color: var(--text-primary); }
+  .topic-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
+  .topic-card-num { font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700; color: var(--accent); }
+  .topic-card-time { font-size: 0.72rem; color: var(--text-muted); }
+  .topic-card-title { font-size: 1rem; font-weight: 600; margin: 0 0 0.3rem; line-height: 1.3; }
+  .topic-card-sub { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.45; margin: 0 0 0.8rem; flex: 1; }
+  .topic-card-tags { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+
+  .phase-skills { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.5rem 1.5rem; list-style: none; margin: 0; padding: 0; }
+  .phase-skills li { position: relative; padding-left: 1.5rem; color: var(--text-secondary); line-height: 1.5; }
+  .phase-skills li::before { content: ''; position: absolute; left: 0; top: 0.5em; width: 8px; height: 8px; border-radius: 9999px; background: var(--accent); }
+  .phase-prereq { color: var(--text-secondary); line-height: 1.6; }
+  .phase-prereq a { color: var(--accent); font-weight: 500; }
+
+  .phase-nav { display: flex; justify-content: space-between; border-top: 1px solid var(--border-color); padding-top: 1.2rem; }
+  .phase-nav a { font-weight: 600; color: var(--accent); }
+</style>

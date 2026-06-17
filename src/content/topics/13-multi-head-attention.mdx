@@ -1,0 +1,198 @@
+---
+title: "Multi-Head Attention"
+subtitle: "Running attention in parallel across multiple subspaces"
+phase: 2
+topicNumber: 13
+slug: "multi-head-attention"
+readingTime: 13
+prerequisites: ["self-attention"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+
+export const topic = getTopicBySlug('multi-head-attention');
+
+<TopicHero topic={topic} />
+
+A single self-attention computes one set of relationships among tokens — one way of deciding what is relevant to what. But language has many *kinds* of relationships happening at once: a verb relates to its subject, a pronoun to its antecedent, an adjective to its noun, a word to the punctuation that ends its clause. Forcing all of these through a single attention pattern is limiting. **Multi-head attention** solves this by running several attention computations in parallel, each free to specialize in a different kind of relationship, then combining their results.
+
+It is a deceptively small change to the self-attention you just learned — a few extra projections and a concatenation — but it is what makes Transformer attention expressive enough to model the rich structure of language. This topic explains the mechanism, the mathematics, the clever way it stays computationally cheap, and what the different heads actually end up learning.
+
+## The limitation of a single head
+
+Recall that self-attention produces, for each token, one probability distribution over all tokens — one row of the attention matrix. That single distribution must capture *everything* the token needs from the rest of the sequence. If "it" needs to attend to its antecedent "animal" for coreference *and* to "tired" for the predicate, a single head has to average those competing demands into one blurry distribution. The result is a compromise that serves no relationship well.
+
+The deeper issue is representational. A single set of `W_Q`, `W_K`, `W_V` projections defines one "view" of the tokens — one subspace in which similarity is measured. Different linguistic relationships are best measured in different subspaces. One head's view ties everything to a single yardstick.
+
+## The multi-head idea
+
+Multi-head attention's fix is simple: instead of one attention with full-dimensional projections, use `h` attentions ("heads"), each with its *own* smaller `W_Q^i`, `W_K^i`, `W_V^i`. Each head projects the input into its own lower-dimensional subspace, runs the full scaled dot-product attention there, and produces its own output. Because the heads have independent projections, they are free to learn to attend to different things — one head might track syntactic dependencies, another might link coreferent mentions, another might simply attend to neighbouring words.
+
+After all heads finish, their outputs are **concatenated** back into a full-dimensional vector and passed through one more learned projection `W_O` that mixes the heads' information into the final result. So the flow is: split into `h` subspaces, attend in each independently and in parallel, concatenate, project.
+
+<Callout type="tip">
+Think of each head as a specialist consultant. One reads the sentence for grammar, another for meaning, another for position. Multi-head attention asks all of them at once and then has a manager (the output projection W_O) combine their reports into a single decision.
+</Callout>
+
+## A geometric view: subspaces
+
+Why do separate subspaces help? Dot-product attention measures similarity by projecting tokens into a space and taking inner products. The choice of projection determines *what counts as similar*. In one subspace, "cat" and "dog" might be close (both animals); in another, "cat" and "sat" might be close (subject and its verb). A single head can only pick one such geometry. Multiple heads give the model several geometries simultaneously, each tuned by gradient descent to surface a useful kind of relationship. The model then learns, via `W_O`, how to weigh and combine those views for the task at hand.
+
+## The Mathematics
+
+Each head `i` runs scaled dot-product attention with its own projections:
+
+<MathBlock
+  formula="\text{head}_i = \text{Attention}(Q W_i^{Q},\; K W_i^{K},\; V W_i^{V})"
+  caption="Head i projects the input into its own subspace and runs scaled dot-product attention there."
+/>
+
+The heads' outputs are concatenated and projected by `W^O`:
+
+<MathBlock
+  formula="\text{MultiHead}(Q,K,V) = \text{Concat}(\text{head}_1, \ldots, \text{head}_h)\, W^{O}"
+  caption="Concatenate all heads, then mix them with a final learned projection W^O."
+/>
+
+The crucial dimensional detail keeps the cost in check. If the model dimension is `d_model` and there are `h` heads, each head uses a reduced dimension:
+
+<MathBlock
+  formula="d_k = d_v = \frac{d_{model}}{h}"
+  caption="Each head operates in d_model/h dimensions, so total work matches a single full-size head."
+/>
+
+With `d_model = 512` and `h = 8`, each head works in 64 dimensions. Because the heads' dimensions sum back to `d_model`, the total computation of multi-head attention is essentially the same as a single full-dimensional attention — you get many perspectives for roughly the price of one.
+
+## What do different heads learn?
+
+When researchers probed trained Transformers, they found that heads specialize in interpretable ways. Some heads attend to the immediately preceding or following token (positional patterns). Some attend from a word to its syntactic head or dependents (grammatical patterns). Some link coreferent mentions or attend to rare, content-bearing words. Not every head is meaningful — studies found many heads can be pruned with little loss — but the diversity is real, and it is exactly what a single head cannot provide. The heads are not told what to specialize in; the specialization emerges from training because diverse views reduce the loss.
+
+<Callout type="warning" title="Heads are not guaranteed to be interpretable">
+While many heads learn clean patterns, do not over-read attention maps. Some heads are redundant, some attend to a 'null' token as a no-op, and attention weights are not a complete explanation of the model's behaviour. Interpretability is suggestive, not definitive.
+</Callout>
+
+## The Mathematics of cost
+
+It is worth stating the cost saving precisely. A single attention over `d_model` dimensions and `h` separate attentions over `d_model/h` dimensions each do comparable total work, because the per-head matrices are smaller by exactly the factor `h`. The extra cost of multi-head attention is only the small output projection `W^O` and the bookkeeping of splitting and concatenating. In exchange you get `h` independent relationship-finders. This favorable trade — much more expressiveness for almost no extra compute — is a big part of why the design stuck.
+
+## How many heads is the right number?
+
+If more heads give more perspectives, why not use hundreds? Two forces push back. First, the per-head dimension `d_k = d_model/h` shrinks as `h` grows. With `d_model = 512`, eight heads give each head 64 dimensions to work in; sixty-four heads would give each only 8, which is too little room to represent a useful query-key geometry. There is a floor below which heads become too cramped to learn anything distinct. Second, beyond a point the extra heads simply become redundant — pruning studies repeatedly find that a trained model often relies on a minority of its heads, and the rest can be removed with little accuracy loss.
+
+In practice the original Transformer used 8 heads with `d_model = 512`, and large language models scale both together: as the model dimension grows into the thousands, the head count grows into the dozens while keeping per-head dimension around 64 to 128. The number is a hyperparameter tuned empirically, but the guiding principle is to balance *diversity* (more heads) against *capacity per head* (larger `d_k`). It is the same kind of trade-off that runs through all of deep learning: split a fixed budget into many small specialists or a few large generalists.
+
+## Multi-head attention in cross-attention
+
+So far we framed multi-head attention as self-attention, where queries, keys, and values all come from one sequence. The exact same module also powers *cross*-attention in the Transformer decoder. There, the queries come from the decoder's tokens while the keys and values come from the encoder's output. Multi-head cross-attention lets each decoder position consult the encoded source from several perspectives at once — one head might align to the corresponding source word, another might gather broader context. The code and math are identical; only the source of Q versus K and V changes. This reuse is part of the Transformer's elegance: a single attention module, configured two ways, handles both within-sequence and across-sequence relationships.
+
+## A modern wrinkle: multi-query and grouped-query attention
+
+The standard design gives every head its own keys and values. That is expressive, but at inference time it makes the key-value cache (Topic 38) large, because you must store separate keys and values for every head at every past position. Modern large models often economize with **multi-query attention (MQA)**, where all heads share a single set of keys and values while keeping separate queries, and the gentler **grouped-query attention (GQA)**, where heads are partitioned into a few groups that each share keys and values.
+
+These variants trade a little quality for a large reduction in memory bandwidth and cache size, which is the dominant cost when serving long-context models. GQA in particular has become a default in recent open models because it recovers most of multi-head's quality at a fraction of the serving cost. You do not need the details yet — the point is that the multi-head idea you are learning here is not frozen. It is an active design space, and the knobs are exactly the ones this topic introduces: how many heads, how to share keys and values among them, and how big each head's subspace should be.
+
+## Masks in batched multi-head attention
+
+A practical detail that every real implementation must handle: when you process a batch of sentences of different lengths, you pad the short ones with a special padding token so they form a rectangular tensor. But the model must not *attend* to padding — those positions are meaningless filler, and letting real tokens average in padding values would corrupt their representations.
+
+The solution reuses the masking idea from self-attention. A **padding mask** marks which positions are real and which are pad, and before the softmax the scores for padded keys are set to negative infinity, driving their attention weights to zero. Because multi-head attention computes its scores as a single batched tensor of shape `(batch, heads, n, n)`, the mask is broadcast across the head dimension so every head respects it identically. In a decoder, this padding mask is combined with the causal mask from Topic 12 — a position must ignore both future tokens and padding tokens at once, so the two masks are simply added (both contributing negative infinity where attention is forbidden).
+
+Getting masks right is one of the most common sources of subtle Transformer bugs. A model that silently attends to padding will often still train and produce plausible-looking loss curves, while quietly leaking information and underperforming. The lesson generalizes: attention is a flexible mechanism whose behaviour is shaped as much by *what you forbid it to see* as by the queries, keys, and values you feed it. Masking — causal, padding, or task-specific — is the lever that turns one generic operation into encoders, decoders, and everything in between.
+
+## Code Example
+
+The implementation below builds multi-head attention from scratch in PyTorch by reshaping the projected tensors into `h` heads, running batched scaled dot-product attention, then concatenating and projecting.
+
+<CodeBlock lang="python" filename="multi_head_attention.py" code={`# multi_head_attention.py
+# pip install torch
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model, n_heads):
+        super().__init__()
+        assert d_model % n_heads == 0
+        self.h = n_heads
+        self.d_k = d_model // n_heads          # per-head dimension
+        self.Wq = nn.Linear(d_model, d_model)
+        self.Wk = nn.Linear(d_model, d_model)
+        self.Wv = nn.Linear(d_model, d_model)
+        self.Wo = nn.Linear(d_model, d_model)  # final output projection
+
+    def forward(self, x):
+        B, n, _ = x.shape
+        # project then split into heads: (B, h, n, d_k)
+        def split(t):
+            return t.view(B, n, self.h, self.d_k).transpose(1, 2)
+        Q, K, V = split(self.Wq(x)), split(self.Wk(x)), split(self.Wv(x))
+
+        scores = Q @ K.transpose(-2, -1) / self.d_k ** 0.5   # (B, h, n, n)
+        A = F.softmax(scores, dim=-1)
+        heads = A @ V                                        # (B, h, n, d_k)
+
+        # concat heads back to (B, n, d_model) and project
+        out = heads.transpose(1, 2).contiguous().view(B, n, -1)
+        return self.Wo(out), A
+
+torch.manual_seed(0)
+d_model, n_heads, n = 512, 8, 5
+mha = MultiHeadAttention(d_model, n_heads)
+x = torch.randn(1, n, d_model)
+out, A = mha(x)
+
+print("d_k per head:", d_model // n_heads)   # 512 / 8 = 64
+print("attention shape (B,h,n,n):", tuple(A.shape))
+print("output shape:", tuple(out.shape))
+
+# Expected:
+# d_k per head: 64
+# attention shape (B,h,n,n): (1, 8, 5, 5)
+# output shape: (1, 5, 512)
+`} />
+
+The attention tensor has a head dimension — `(1, 8, 5, 5)` means 8 separate 5×5 attention matrices, one per head — and the output is back to full `d_model`. Each of those 8 matrices is a different perspective on the same five tokens, and `W_O` learns how to fuse them. With multi-head attention understood, you have the two main ingredients of a Transformer layer; the only missing piece before we assemble the encoder is telling the model *where* each token sits.
+
+<KeyTakeaways phase={2}>
+- A **single attention head** gives one relationship pattern; many linguistic relationships compete and blur together in it.
+- **Multi-head attention** runs `h` attentions in parallel, each with its own `W_Q^i, W_K^i, W_V^i`, so heads specialize in different relationships.
+- Heads operate in **reduced dimension `d_k = d_model/h`**, so total compute roughly equals a single full-size attention — many views for the price of one.
+- Outputs are **concatenated and projected by `W^O`**, which mixes the heads into a final representation.
+- Different heads learn **interpretable but not guaranteed** patterns: positional, syntactic, coreference; many are redundant and prunable.
+- Multi-head attention is the expressive core of a Transformer layer.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "If d_model = 512 and h = 8 heads, what is d_k for each head?",
+    options: ["512", "256", "64", "8"],
+    correctIndex: 2,
+    explanation: "Each head operates in d_model / h = 512 / 8 = 64 dimensions, so the heads' dimensions sum back to d_model and total compute matches a single full-size attention."
+  },
+  {
+    question: "Why use multiple heads instead of one?",
+    options: ["To make the model smaller", "So different heads can attend to different kinds of relationships in different subspaces", "To remove the softmax", "To avoid positional encoding"],
+    correctIndex: 1,
+    explanation: "Each head has independent projections defining its own subspace, letting heads specialize (syntax, coreference, position) rather than averaging everything into one distribution."
+  },
+  {
+    question: "After the heads compute their outputs, what happens next?",
+    options: ["They are averaged", "They are concatenated and passed through a learned output projection W^O", "Only the best head is kept", "They are added to the input embeddings"],
+    correctIndex: 1,
+    explanation: "The h head outputs are concatenated back to d_model dimensions and projected by W^O, which mixes the heads' information into the final result."
+  }
+]} />
+
+## What's Next
+
+Self-attention and multi-head attention both treat the input as an unordered set — they are permutation-invariant. Before we can stack them into a working Transformer, we must restore word order. In **Positional Encoding**, you will see the elegant sinusoidal trick (and its learned and relative cousins) that gives the Transformer a sense of position.

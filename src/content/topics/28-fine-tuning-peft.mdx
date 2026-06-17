@@ -1,0 +1,173 @@
+---
+title: "Fine-tuning — Full vs Parameter-Efficient (PEFT)"
+subtitle: "Adapting large models without retraining all their weights"
+phase: 3
+topicNumber: 28
+slug: "fine-tuning-peft"
+readingTime: 14
+prerequisites: ["gpt-autoregressive-lm"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('fine-tuning-peft');
+
+<TopicHero topic={topic} />
+
+You have a pre-trained, aligned model and a specialized task — a particular domain, tone, or format. Fine-tuning adapts the model to it, but for a multi-billion-parameter model, updating *every* weight is brutally expensive: it requires storing gradients and optimizer state for billions of parameters, demanding enormous GPU memory, and it produces a full copy of the model for every task. **Parameter-Efficient Fine-Tuning (PEFT)** is the family of methods that adapt large models by training only a *tiny* fraction of parameters — often well under 1% — while freezing the rest. This topic surveys the PEFT landscape: adapters, prefix tuning, prompt tuning, and the dominant method, LoRA (covered in depth next topic).
+
+PEFT is what makes fine-tuning large models accessible outside the biggest labs. It turns a task that once needed a cluster into one that fits on a single consumer GPU, and it lets you maintain dozens of task-specific adaptations as small files rather than full model copies.
+
+## The cost of full fine-tuning
+
+Full fine-tuning updates all of a model's weights. The memory cost is the real problem. A 7-billion-parameter model in 16-bit precision is about 14 GB just for the weights — but training needs much more: gradients (another copy), and optimizer state (Adam keeps two more copies, the momentum and variance). In practice, full fine-tuning a model needs roughly *4× the model size* in memory before activations, so a 7B model can require 50-80 GB, beyond a single consumer GPU. And every fine-tuned task produces a complete new 14 GB model to store and serve. For large models and many tasks, this does not scale.
+
+## Why PEFT works
+
+PEFT rests on a powerful empirical observation: adapting a large pre-trained model to a downstream task requires changing surprisingly *little*. The pre-trained weights already encode general competence; specializing them needs only a small, low-dimensional adjustment. So instead of updating all weights, PEFT methods freeze the pre-trained model and introduce a small number of *new* trainable parameters, or train a tiny existing subset. Because only those few parameters have gradients and optimizer state, memory plummets, and each task's adaptation is just a few megabytes.
+
+<Callout type="tip">
+The mental shift: you are not retraining the model, you are learning a small 'patch' that steers the frozen model toward your task. The patch is tiny, fast to train, and cheap to store — you can keep hundreds of them for one base model.
+</Callout>
+
+## The PEFT family
+
+Several PEFT methods evolved, differing in *where* they inject trainable parameters:
+
+- **Adapters** (Houlsby et al. 2019): insert small trainable bottleneck layers between the frozen Transformer sublayers. Effective, but they add layers that slightly slow inference.
+- **Prefix Tuning** (Li & Liang 2021): prepend trainable "virtual token" vectors to the keys and values at every layer, steering attention without touching the weights.
+- **Prompt Tuning** (Lester et al. 2021): a lighter cousin that prepends trainable *soft prompt* embeddings only at the input layer. Extremely few parameters; works best at large scale.
+- **LoRA** (Hu et al. 2021): inject low-rank update matrices into the attention (and sometimes FFN) weights; the dominant method today, covered fully in Topic 29.
+- **(IA)³**: learn small vectors that rescale the keys, values, and FFN activations — even fewer parameters than LoRA.
+
+## Comparing the methods
+
+<ComparisonTable
+  phase={3}
+  headers={["Method", "What it trains", "% params", "Inference overhead"]}
+  rows={[
+    ["Full fine-tuning", "All weights", "100%", "None (but huge to train/store)"],
+    ["Adapters", "Inserted bottleneck layers", "~1-4%", "Slight (extra layers)"],
+    ["Prefix tuning", "Virtual key/value vectors per layer", "~0.1-1%", "Slight (longer attention)"],
+    ["Prompt tuning", "Soft prompt at input only", "<0.1%", "Slight (longer input)"],
+    ["LoRA", "Low-rank weight updates (B, A)", "~0.1-1%", "None (mergeable)"],
+    ["(IA)³", "Activation-scaling vectors", "<0.1%", "Minimal"],
+  ]}
+  caption="PEFT methods trade where parameters are injected against count and inference cost."
+/>
+
+LoRA's standout property is the **None** in the last column: its low-rank updates can be *merged* back into the base weights after training, so the deployed model has zero extra inference cost — a key reason it won.
+
+## The HuggingFace PEFT library
+
+The PEFT ecosystem is unified by HuggingFace's `peft` library, which wraps any base model with a chosen method through a small config object. You specify the method (LoRA, prefix tuning, etc.) and its hyperparameters, wrap the model, and train as usual — only the injected parameters update. The trained adaptation is saved as a small file (often a few megabytes) that can be loaded onto the base model on demand. This makes it trivial to maintain many task-specific adaptations for one base model and to switch between them.
+
+## When to use full fine-tuning vs PEFT
+
+Reach for **PEFT** in almost all cases: limited GPU memory, many tasks to support, frequent re-training, or when you want small, swappable adaptations. PEFT matches full fine-tuning quality on most tasks while using a fraction of the resources. Reserve **full fine-tuning** for when you have ample compute *and* need to make deep, pervasive changes — substantially shifting the model's domain or behaviour, or continued pre-training on a large new corpus — where a small patch is insufficient. For the everyday task of adapting a model to a specific format, tone, or narrow domain, PEFT is the clear default.
+
+## Adapters and soft prompts in a little more depth
+
+It is worth understanding *why* the different PEFT methods inject parameters where they do, because the placement reflects a hypothesis about what adaptation requires. **Adapters** add a small bottleneck — a down-projection to a tiny dimension, a non-linearity, and an up-projection back — inserted after the attention and feed-forward sublayers. The bottleneck forces the adaptation to be low-dimensional, which is both why it is parameter-efficient and why it works: the hypothesis is that the *change* needed for a new task lives in a low-dimensional subspace, even though the model itself is high-dimensional. The cost is that adapters sit in the forward path as extra layers, so they add a little latency at inference that cannot be removed.
+
+**Soft prompts** — prefix tuning and prompt tuning — take a different view: rather than modifying the model's computation, they modify its *input*. Prompt tuning prepends a handful of trainable embedding vectors to the input sequence; these "virtual tokens" do not correspond to any real word, but gradient descent tunes them so that, prepended to a task input, they steer the frozen model toward the right behaviour. It is the learned, continuous analogue of writing a clever prompt by hand — instead of searching for the right words, you optimize directly in embedding space. Prefix tuning extends this to every layer by prepending trainable key and value vectors throughout the stack, giving more steering power at the cost of more parameters. A fascinating property of prompt tuning is that it becomes *more* effective as the base model grows: at small scale it lags full fine-tuning, but at very large scale a few thousand soft-prompt parameters can nearly match it, suggesting that bigger models are easier to steer with smaller nudges.
+
+## Serving many adaptations and multi-tenancy
+
+The operational payoff of PEFT becomes vivid when you must serve *many* specialized models. Imagine a product that offers a hundred customers each their own fine-tuned assistant. With full fine-tuning, that is a hundred complete model copies — hundreds of gigabytes to store and, worse, you cannot fit them all in GPU memory at once, so switching customers means reloading a multi-gigabyte model. With PEFT, you store one base model plus a hundred small adapter files of a few megabytes each. The base model stays resident in GPU memory, and you swap in the relevant customer's tiny adapter on demand.
+
+This unlocks genuine **multi-tenancy**. Advanced serving systems can even hold many LoRA adapters in memory simultaneously and batch requests for different adapters together against the shared frozen base, so a single GPU serves dozens of distinct fine-tuned models at once with minimal overhead. The economics are transformative: the marginal cost of a new specialized model drops from "another full model to host" to "another few-megabyte file." This is why PEFT is not merely a training convenience but a deployment architecture, and it is central to how companies offer customizable models at scale. When you design a system that needs per-customer or per-task specialization, thinking in terms of one shared base plus many lightweight adapters — rather than many independent models — is usually the path to something affordable and operable.
+
+## A note on quality and where PEFT falls short
+
+PEFT methods match full fine-tuning closely on a wide range of tasks, but it would be misleading to claim they are universally equivalent. For adaptations that require *broad, pervasive* change — teaching the model a large body of new knowledge, shifting it to a very different domain or language, or continued pre-training on a huge corpus — the small capacity of a PEFT patch can be a genuine ceiling. A low-rank update of a few hundred thousand parameters simply cannot encode as much new information as updating all the weights. In those cases, full fine-tuning (or even continued pre-training) earns its cost.
+
+The practical heuristic, then, is to match the method to the *magnitude* of the change. Narrow behavioural or stylistic adaptation, format-following, a specific task or tone — PEFT, almost always. Deep domain shift or substantial new knowledge — consider full fine-tuning, or combine approaches by first doing a lighter continued pre-training and then PEFT on top. The good news is that the vast majority of real fine-tuning needs are of the narrow kind, which is exactly why PEFT became the default. Knowing the boundary — that PEFT trades a little capacity for enormous efficiency, and that the trade only fails for large-magnitude changes — lets you choose deliberately rather than reaching for full fine-tuning out of habit and paying for capacity you do not need.
+
+## Choosing the knobs
+
+PEFT methods come with a few hyperparameters that materially affect results, and a little guidance prevents wasted runs. The most consequential, for LoRA and adapters, is the **rank** (or bottleneck dimension) — how many trainable dimensions the patch gets. A higher rank gives the adaptation more capacity but more parameters; common values are small (4, 8, 16, sometimes 64). The pragmatic approach is to start low, since surprisingly small ranks suffice for narrow tasks, and increase only if the model underfits your data. A second knob is *which modules* to adapt: applying LoRA only to the attention query and value projections is a common, efficient default, while also adapting the feed-forward and key projections adds capacity at more cost.
+
+Beyond method-specific knobs, ordinary fine-tuning hyperparameters still matter, sometimes more. PEFT often tolerates — and benefits from — a somewhat higher learning rate than full fine-tuning, because the few trainable parameters can move further without destabilizing the frozen base. Training for too many epochs on a small dataset overfits just as it would in full fine-tuning, so early stopping and a held-out validation set remain essential. None of this is exotic, but it is where PEFT runs succeed or fail in practice: the method makes fine-tuning *cheap enough to iterate*, and iterating sensibly on rank, target modules, learning rate, and epochs is what turns that cheapness into a good model.
+
+## Code Example
+
+The code wraps a model with LoRA via the `peft` library and prints the dramatic difference between total and trainable parameters — the essence of PEFT.
+
+<CodeBlock lang="python" filename="peft_param_count.py" code={`# peft_param_count.py
+# pip install peft transformers torch
+from transformers import AutoModelForCausalLM
+from peft import LoraConfig, get_peft_model
+
+base = AutoModelForCausalLM.from_pretrained("gpt2")   # 124M params
+
+total_base = sum(p.numel() for p in base.parameters())
+print(f"base model parameters: {total_base:,}")
+
+# Wrap with LoRA: inject low-rank adapters into attention projections
+lora_cfg = LoraConfig(
+    r=8,                       # rank of the low-rank update
+    lora_alpha=16,             # scaling
+    target_modules=["c_attn"], # which weight matrices to adapt
+    lora_dropout=0.05,
+)
+model = get_peft_model(base, lora_cfg)
+
+trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+total = sum(p.numel() for p in model.parameters())
+print(f"trainable parameters: {trainable:,}")
+print(f"trainable percentage: {100 * trainable / total:.3f}%")
+model.print_trainable_parameters()
+
+# Only the tiny LoRA matrices get gradients; the base model is frozen.
+# Expected (approx):
+# base model parameters: 124,439,808
+# trainable parameters: 294,912
+# trainable percentage: 0.237%
+`} />
+
+The numbers tell the whole story: of GPT-2's ~124 million parameters, LoRA makes only about 295,000 — roughly **0.24%** — trainable. Training and storing a quarter-million parameters instead of 124 million is the difference between a cluster and a laptop, and between gigabyte model copies and megabyte adapter files. The next topic dives into exactly how LoRA's low-rank updates achieve this with no loss in quality and no inference overhead.
+
+<KeyTakeaways phase={3}>
+- **Full fine-tuning** updates all weights and needs roughly 4× the model size in memory (weights + gradients + optimizer state), plus a full model copy per task — it does not scale.
+- **PEFT** freezes the base model and trains a tiny fraction of parameters (often under 1%), exploiting that task adaptation requires only small, low-dimensional changes.
+- The family includes **adapters** (bottleneck layers), **prefix tuning** (virtual key/value vectors), **prompt tuning** (soft input prompts), **LoRA** (low-rank updates), and **(IA)³** (activation scaling).
+- **LoRA** uniquely has **zero inference overhead** because its updates merge into the base weights; it is the dominant method.
+- The **HuggingFace `peft` library** unifies these methods; adaptations save as small, swappable files.
+- **PEFT is the default**; reserve full fine-tuning for deep, pervasive changes when compute is ample.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Roughly how many parameters does LoRA add to fine-tune a model, compared to full fine-tuning?",
+    options: ["More than full fine-tuning", "About the same", "A tiny fraction — often well under 1% of the model's parameters", "Exactly half"],
+    correctIndex: 2,
+    explanation: "PEFT methods like LoRA train only a small set of injected parameters (typically 0.1-1%), freezing the rest, which slashes memory and storage versus updating all weights."
+  },
+  {
+    question: "Why does full fine-tuning need so much more memory than the model weights alone?",
+    options: ["It duplicates the vocabulary", "It must also store gradients and optimizer state (Adam keeps two extra copies) for every parameter", "It uses a bigger batch size", "It adds new layers"],
+    correctIndex: 1,
+    explanation: "Training stores gradients (one copy) and Adam's momentum and variance (two more copies) for every trainable parameter, so full fine-tuning needs roughly 4× the model size in memory."
+  },
+  {
+    question: "What gives LoRA an advantage over adapters at inference time?",
+    options: ["It uses more parameters", "Its low-rank updates can be merged back into the base weights, adding zero inference overhead", "It removes attention", "It needs no training"],
+    correctIndex: 1,
+    explanation: "LoRA's learned low-rank matrices can be folded into the original weights after training, so the deployed model is identical in size and speed to the base — unlike adapters, which add extra layers."
+  }
+]} />
+
+## What's Next
+
+PEFT's most important method deserves its own deep dive. In **LoRA & QLoRA**, we unpack the low-rank decomposition that makes LoRA work, the math behind its parameter savings, and how QLoRA combines it with 4-bit quantization to fine-tune a 65-billion-parameter model on a single GPU.

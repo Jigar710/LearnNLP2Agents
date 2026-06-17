@@ -1,0 +1,190 @@
+---
+title: "GPT — Autoregressive Language Modeling"
+subtitle: "Predict the next token — the paradigm that powers all LLMs"
+phase: 2
+topicNumber: 20
+slug: "gpt-autoregressive-lm"
+readingTime: 16
+prerequisites: ["transformer-decoder"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: true
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+import DiagramWrapper from '../../components/topic/DiagramWrapper.astro';
+import TokenGeneration from '../../components/diagrams/TokenGeneration.tsx';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('gpt-autoregressive-lm');
+
+<TopicHero topic={topic} />
+
+If BERT taught machines to understand by filling in blanks, GPT taught them to *write* by predicting the next word. The Generative Pre-trained Transformer is a decoder-only model trained on a single, almost laughably simple objective: given the words so far, predict the next one. Scaled up, that one objective produced models that can translate, summarize, answer questions, write code, and hold conversations — abilities never explicitly trained for. This topic explains the autoregressive paradigm, why predicting the next token is so powerful, and the emergent capability — in-context learning — that made GPT the template for every modern large language model.
+
+GPT is the decoder you built in Topic 16, used on its own. Here we cover its causal language-modelling objective and its mathematics, the GPT-1 architecture, the decisive generative advantage over BERT, the sampling strategies that turn probabilities into text, and the in-context learning that lets a frozen model perform new tasks from examples in the prompt. An interactive demo animates token-by-token generation, and the code runs a real GPT-2.
+
+## Architecture: a decoder, used alone
+
+GPT is a **decoder-only Transformer**: a stack of decoder layers with masked (causal) self-attention and no encoder, so no cross-attention. Because the self-attention is causal, each token attends only to itself and the tokens before it. This is the defining contrast with BERT: where BERT sees in both directions and excels at understanding, GPT sees only leftward and excels at generation, because predicting the next token is precisely a left-to-right operation. GPT-1 (2018) had 12 decoder layers, a hidden size of 768, and about 117 million parameters — comparable to BERT-base, but pointed at a fundamentally different objective.
+
+## The causal language-modelling objective
+
+GPT is trained with **Causal Language Modelling (CLM)**: predict the next token given all previous tokens. There is no masking of random words as in BERT; instead the causal attention mask ensures each position can only use earlier tokens, and the model is trained to predict each token from its predecessors. This objective is self-supervised — the "label" for each position is simply the actual next token in the text — so it can consume unlimited unlabelled data.
+
+The elegance is that next-token prediction, pursued well enough, *requires* understanding. To predict the token after "The capital of France is", the model must know geography. To continue "def factorial(n): return", it must understand recursion. To finish a mystery novel's sentence, it must track plot and character. Language modelling is not a narrow skill; it is a compression of nearly everything expressible in text.
+
+## The Mathematics
+
+A language model defines a probability distribution over sequences. By the chain rule of probability, the probability of a whole sequence factorizes into a product of next-token probabilities — the **autoregressive factorization**:
+
+<MathBlock
+  formula="P(w_1, w_2, \ldots, w_n) = \prod_{t=1}^{n} P(w_t \mid w_1, \ldots, w_{t-1})"
+  caption="Any sequence's probability is the product of each token's probability given all earlier tokens."
+/>
+
+Training maximizes the log-likelihood of the data, equivalently minimizing the average negative log-probability the model assigns to each true next token:
+
+<MathBlock
+  formula="\mathcal{L} = -\sum_{t=1}^{n} \log P_\theta\big(w_t \mid w_{<t}\big)"
+  caption="The causal language-modelling loss — the model is rewarded for assigning high probability to the actual next token."
+/>
+
+This is the same cross-entropy objective from Topic 17, applied with a causal mask and no encoder. Every modern large language model, no matter how enormous, is trained on essentially this one loss.
+
+## Generating text and the sampling problem
+
+At each step the model outputs a probability distribution over the whole vocabulary. Turning that distribution into actual text is the **decoding** decision previewed in Topic 16, and it matters enormously for output quality. **Greedy** decoding always takes the most likely token — safe but repetitive. **Sampling** introduces randomness, shaped by three knobs. **Temperature** rescales the logits before the softmax: low temperature sharpens the distribution toward the top choices (more deterministic), high temperature flattens it (more creative and random). **Top-k** sampling restricts choices to the `k` most probable tokens; **top-p (nucleus)** sampling restricts them to the smallest set whose probabilities sum to `p`. Tuning these lets you slide from rigid and factual to wild and inventive.
+
+<DiagramWrapper title="Autoregressive generation" caption="Press Generate to watch tokens appear one at a time; the bar chart shows each step's next-token distribution.">
+  <TokenGeneration client:visible />
+</DiagramWrapper>
+
+<Callout type="tip">
+Temperature is the single most useful generation knob. Near 0, the model is near-deterministic and good for factual answers; around 0.7-1.0 it is creative and good for brainstorming or fiction. The same model can feel rigid or unhinged depending on this one number.
+</Callout>
+
+## The generative advantage and in-context learning
+
+BERT understands but cannot generate; GPT does both, because generation subsumes understanding — to write the answer, you must understand the question. This unification is GPT's great advantage. But the truly surprising capability emerged at scale: **in-context learning**. A large enough GPT can perform a brand-new task simply from a description or a few examples placed in its prompt, with *no gradient updates at all*. Show it three examples of English-to-French translation and it translates a fourth; describe a classification scheme and it applies it. The model's weights never change — it "learns" the task from the context window alone.
+
+This is foreign to BERT, which needs a fine-tuning step and labelled data for every task. In-context learning means one frozen model can do thousands of tasks, selected by prompt. We distinguish **zero-shot** (task described, no examples), **one-shot** (one example), and **few-shot** (several examples) prompting. The discovery that scale unlocks in-context learning, detailed in the next phase, is what turned language models from autocomplete into general-purpose tools.
+
+## Why next-token prediction is so general
+
+It can seem almost too simple that "predict the next token" yields models that translate, code, and reason. The depth becomes clear once you notice that *any* task expressible in text can be reframed as completion. Translation is completing "English: hello \-> French:". Summarization is completing "Article: ... \\nSummary:". Question answering is completing "Q: ... \\nA:". Arithmetic is completing "2 + 2 =". Sentiment is completing "Review: ... \\nSentiment:". Because the training text on the open web contains countless naturally-occurring instances of all these patterns, a model trained to continue text inevitably learns to perform the tasks those patterns represent.
+
+This is the conceptual unlock behind large language models: there is no need to design a separate architecture or objective per task, because next-token prediction over diverse enough data already contains every task in latent form. The model does not have a "translation mode" and a "summarization mode"; it has one mode — predict what comes next — and the prompt selects which latent capability to surface. Understanding this reframing is the key to using these models well, and it is why so much of Phase 4 is about *prompting*: choosing the textual context that steers a single next-token predictor toward the behaviour you want.
+
+## GPT-1's two-stage recipe
+
+The original GPT paper proposed a recipe that, in hindsight, mapped the path forward. Stage one was **generative pre-training**: train the decoder on a large corpus of books with the plain next-token objective, learning general language competence with no labels. Stage two was **discriminative fine-tuning**: adapt the pre-trained model to a specific labelled task by adding a small output layer and training briefly, much like BERT. GPT-1 still relied on this fine-tuning step for each task.
+
+What changed with GPT-2 and especially GPT-3 was the realization that, at sufficient scale, the second stage often becomes unnecessary — the pre-trained model can be steered to new tasks by prompting alone. The recipe collapsed from "pre-train then fine-tune per task" to "pre-train once, then prompt." GPT-1 is therefore best understood as the conceptual seed: it established that a generatively pre-trained decoder transfers to downstream tasks, and the following models showed that scaling this idea eliminates the need for task-specific training in many cases. The architecture barely changed across the generations; the data, the parameter count, and the resulting capabilities exploded.
+
+## Perplexity and evaluating language models
+
+How do you measure whether a language model is good at its core objective? The standard intrinsic metric is **perplexity**, which you met in Phase 1: the exponential of the average negative log-likelihood the model assigns to held-out text. Intuitively, perplexity is the model's average "branching factor" — how many equally-likely options it is effectively choosing among at each step. A perplexity of 20 means the model is about as uncertain as if it were picking uniformly among 20 words; lower is better, and a model that perfectly predicted the text would have perplexity 1.
+
+Perplexity is convenient because it is computed directly from the training objective and needs no labels, which makes it ideal for tracking pre-training progress and comparing models on the same data. But it has limits: a low perplexity does not guarantee a model is helpful, truthful, or safe, and perplexities are only comparable when computed with the same tokenizer on the same text. This is why the field supplements perplexity with task benchmarks and human evaluation, a theme we develop fully in Topic 37. For now, hold the intuition: training drives perplexity down, and a model that is genuinely less "surprised" by real language has, in a precise sense, learned more about it.
+
+## GPT versus BERT, side by side
+
+Having met both paradigms, it helps to set them directly against each other, because the contrast clarifies when to reach for which. BERT is an **encoder** with **bidirectional** attention trained by **masked** language modelling; GPT is a **decoder** with **causal** attention trained by **next-token** prediction. BERT produces fixed representations ideal for classification, tagging, and retrieval, but cannot generate fluent text. GPT generates and, at scale, performs tasks from prompts via in-context learning, but its leftward-only attention makes its representations less ideal for pure understanding tasks than a bidirectional encoder of the same size.
+
+For a long time the practical advice was simple: use BERT-family encoders for understanding and retrieval, use GPT-family decoders for generation. That advice still holds for many production systems, especially cost-sensitive ones where a small fine-tuned encoder beats a giant LLM on a fixed classification task. But the rise of in-context learning tilted the general-purpose landscape toward decoders, because one prompted GPT can cover an enormous range of tasks without any task-specific training. The two are not really competitors so much as complementary halves of the field — and, as noted in the BERT topic, modern systems frequently use both together: an encoder retrieves, a decoder generates. Knowing the strengths and masking of each is what lets you assemble them sensibly, which is exactly the engineering judgment Phase 4 will ask of you.
+
+## Code Example
+
+The code loads GPT-2 and generates text with different temperatures, so you can watch the same model shift from focused to creative, then evaluates the next-token distribution directly.
+
+<CodeBlock lang="python" filename="gpt2_generate.py" code={`# gpt2_generate.py
+# pip install transformers torch
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
+tok = AutoTokenizer.from_pretrained("gpt2")
+model = AutoModelForCausalLM.from_pretrained("gpt2")
+model.eval()
+
+prompt = "In the year 2050, artificial intelligence"
+ids = tok(prompt, return_tensors="pt").input_ids
+
+# Generate at two temperatures to see the effect
+for temp in (0.3, 1.2):
+    out = model.generate(
+        ids, max_new_tokens=25, do_sample=True,
+        temperature=temp, top_p=0.95, pad_token_id=tok.eos_token_id,
+    )
+    print(f"\\n[temperature={temp}]")
+    print(tok.decode(out[0], skip_special_tokens=True))
+
+# Inspect the next-token distribution after the prompt
+with torch.no_grad():
+    logits = model(ids).logits[0, -1]          # last position's logits
+probs = torch.softmax(logits, dim=-1)
+topk = torch.topk(probs, 5)
+print("\\nTop-5 next tokens:")
+for p, i in zip(topk.values, topk.indices):
+    print(f"  {tok.decode([i]):<12} {p:.3f}")
+
+# Expected (sampled text varies):
+# [temperature=0.3]  ...focused, coherent continuation...
+# [temperature=1.2]  ...wilder, more surprising continuation...
+# Top-5 next tokens:
+#   will         0.18
+#   has          0.07
+#   is           0.06
+#   ...
+`} />
+
+Run it and the temperature effect is unmistakable: at 0.3 the continuation is cautious and coherent; at 1.2 it is adventurous and sometimes incoherent — same weights, different sampling. The top-5 printout exposes the raw distribution the model produces at each step, the probabilities that the demo above animates. This humble next-token machine, scaled from 117 million to hundreds of billions of parameters, becomes the large language models of Phase 3.
+
+<PaperLink
+  title="Improving Language Understanding by Generative Pre-Training"
+  authors="Radford, Narasimhan, Salimans, Sutskever"
+  year={2018}
+  venue="OpenAI"
+  url="https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf"
+/>
+
+<KeyTakeaways phase={2}>
+- GPT is a **decoder-only Transformer** with causal self-attention — each token sees only earlier tokens, ideal for left-to-right generation.
+- It is trained with **Causal Language Modelling**: predict the next token given the previous ones, a self-supervised objective on unlimited text.
+- The **autoregressive factorization** writes a sequence's probability as a product of next-token probabilities; training minimizes next-token cross-entropy.
+- **Generation subsumes understanding** — to write the answer you must understand the question — giving GPT a unified advantage over BERT.
+- **Sampling knobs** (temperature, top-k, top-p) turn the output distribution into text, sliding from factual to creative.
+- At scale, GPT exhibits **in-context learning**: performing new tasks from a prompt's description or examples, with no weight updates — the basis of zero/few-shot prompting.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What is the key difference in pre-training between BERT and GPT?",
+    options: ["BERT predicts the next token; GPT fills in masks", "BERT fills in masked tokens (bidirectional MLM); GPT predicts the next token (causal LM)", "They use the same objective", "GPT uses no attention"],
+    correctIndex: 1,
+    explanation: "BERT is trained with masked language modelling using bidirectional context; GPT is trained with causal (next-token) language modelling using only leftward context, which enables open-ended generation."
+  },
+  {
+    question: "What does 'in-context learning' mean?",
+    options: ["Fine-tuning the model on new data", "Performing a new task from a description or examples in the prompt, with no gradient updates", "Training a new model from scratch", "Using a larger vocabulary"],
+    correctIndex: 1,
+    explanation: "A large enough GPT can do a new task purely from instructions or examples placed in its context window — its weights never change. This emergent ability underlies zero-, one-, and few-shot prompting."
+  },
+  {
+    question: "What does raising the sampling temperature do?",
+    options: ["Makes output more deterministic and focused", "Flattens the distribution, making output more random and creative", "Removes the softmax", "Increases the vocabulary size"],
+    correctIndex: 1,
+    explanation: "Temperature rescales logits before the softmax. Higher temperature flattens the distribution so lower-probability tokens get chosen more often (creative/random); lower temperature sharpens it toward the top choices (focused/deterministic)."
+  }
+]} />
+
+## What's Next
+
+You have completed the architecture phase: attention, the Transformer, and the BERT and GPT paradigms. Phase 3 takes the GPT recipe and asks what happens when you make it enormous. In **LLM Evolution — GPT-2, GPT-3, GPT-4 & Claude**, we trace the scaling revolution from 117 million to over a trillion parameters and the emergent abilities that appeared along the way.

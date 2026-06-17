@@ -1,0 +1,205 @@
+---
+title: "Pre-training Objectives — MLM, CLM & Span Corruption"
+subtitle: "The self-supervised tasks that teach LLMs everything they know"
+phase: 3
+topicNumber: 23
+slug: "pretraining-objectives"
+readingTime: 14
+prerequisites: ["bert", "gpt-autoregressive-lm"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('pretraining-objectives');
+
+<TopicHero topic={topic} />
+
+Every capability a language model has — grammar, facts, reasoning, style — was learned from a single **pre-training objective**: a self-supervised task whose answers are already present in raw text. We have met several of these objectives in passing: BERT's masked language modelling, GPT's causal language modelling, T5's span corruption. This topic gathers them in one place, derives the two core losses mathematically, adds a few more objectives you should know, and analyzes which objective suits which architecture and why. The objective is the lens through which a model views language, and it shapes everything the model becomes.
+
+The unifying theme is **self-supervision**: turning unlabelled text into a supervised problem for free by hiding part of it and asking the model to predict the hidden part. Because no human labels are needed, these objectives scale to essentially unlimited data, which is exactly why they power models trained on trillions of tokens.
+
+## Self-supervised learning: free labels from raw text
+
+Supervised learning needs labelled examples, which are expensive and scarce. Self-supervised learning sidesteps this by *manufacturing* labels from the data's own structure. Hide a word and the label is the word; hide the future and the label is the next token; corrupt the text and the label is the clean original. The supervision is implicit in the data, so a model can learn from the entire web without a single annotation. This is the engine of modern NLP, and the different pre-training objectives are just different ways of choosing what to hide and what to predict.
+
+## Causal Language Modelling (CLM)
+
+**CLM** — the GPT family's objective — predicts the next token given all previous tokens, using causal (leftward-only) attention. It is the most natural objective for generation, because generation *is* next-token prediction. CLM uses every position as a training signal (each token predicts the next), making it sample-efficient, and it produces models that can generate fluently and learn in context.
+
+## Masked Language Modelling (MLM)
+
+**MLM** — BERT's objective — hides ~15% of tokens and predicts them from bidirectional context. Because the model sees both sides, MLM produces excellent *understanding* representations, but it cannot generate left-to-right, and it is sample-*inefficient*: only the masked 15% of tokens contribute to the loss, so 85% of the compute per sequence yields no direct signal.
+
+## Next Sentence Prediction and why RoBERTa dropped it
+
+**NSP** was BERT's auxiliary objective: predict whether sentence B follows sentence A. It was meant to teach inter-sentence relationships, but **RoBERTa** showed that removing NSP and simply training MLM longer on more data produced *better* results. NSP turned out to be too easy and not very informative. The episode is a useful caution: an objective that sounds helpful may add little, and careful ablation beats intuition.
+
+## Span corruption, ELECTRA, and more
+
+Beyond the big three, several objectives matter:
+
+- **Span corruption** (T5): mask contiguous spans, generate them — fits encoder-decoder models (Topic 22).
+- **Replaced Token Detection** (ELECTRA): instead of masking, a small generator replaces some tokens with plausible fakes, and the main model classifies *every* token as real or replaced. Because the loss covers all tokens (not just 15%), ELECTRA is far more compute-efficient than MLM.
+- **Prefix LM** (UniLM, some T5 variants): bidirectional attention over a prefix, causal generation of the continuation — a hybrid of MLM and CLM.
+- **Permutation LM** (XLNet): predict tokens in a random order, capturing bidirectional context without a `[MASK]` token, avoiding BERT's pre-train/fine-tune mismatch.
+
+## The Mathematics
+
+The two foundational losses are both cross-entropy over the model's predicted distributions. **Causal LM** maximizes the probability of each token given its predecessors:
+
+<MathBlock
+  formula="\mathcal{L}_{\text{CLM}} = -\sum_{t=1}^{n} \log P_\theta\big(x_t \mid x_{<t}\big)"
+  caption="Causal LM: predict every token from the tokens before it (GPT)."
+/>
+
+**Masked LM** maximizes the probability of only the masked tokens, conditioned on the entire unmasked context. Let `M` be the set of masked positions and `x_{\setminus M}` the unmasked tokens:
+
+<MathBlock
+  formula="\mathcal{L}_{\text{MLM}} = -\sum_{t \in M} \log P_\theta\big(x_t \mid x_{\setminus M}\big)"
+  caption="Masked LM: predict only the masked tokens from bidirectional context (BERT)."
+/>
+
+The structural difference is visible in the conditioning. CLM conditions on `x_{<t}` (left context only) and sums over *all* positions; MLM conditions on the full surrounding context but sums over *only the masked subset* `M`. That single difference explains both MLM's bidirectional understanding and its sample inefficiency, and both CLM's generative ability and its one-directional view.
+
+<Callout type="tip">
+Read the loss formulas as design statements. The set you sum over (all tokens vs masked tokens) controls sample efficiency; the context you condition on (left-only vs bidirectional) controls whether the model can generate or only understand.
+</Callout>
+
+## Why the objective matters
+
+The objective is not a minor detail — it determines what the model is good at. CLM yields generators (GPT); MLM yields understanders (BERT); span corruption yields seq2seq models (T5); ELECTRA yields efficient encoders. The architecture and objective are chosen together: bidirectional attention pairs with MLM, causal attention pairs with CLM, two stacks pair with span corruption. Choosing the wrong pairing — say, MLM with a causal decoder — wastes the architecture's strengths.
+
+## Comparing the objectives
+
+<ComparisonTable
+  phase={3}
+  headers={["Objective", "Predicts", "Architecture", "Strength"]}
+  rows={[
+    ["Causal LM (CLM)", "Next token from left context", "Decoder", "Generation, in-context learning"],
+    ["Masked LM (MLM)", "Masked tokens from both sides", "Encoder", "Understanding (sample-inefficient)"],
+    ["Next Sentence (NSP)", "Does B follow A?", "Encoder (aux)", "Weak; dropped by RoBERTa"],
+    ["Span corruption", "Masked spans (generated)", "Encoder-decoder", "Seq2seq, text-to-text"],
+    ["Replaced Token Detection", "Is each token real or fake?", "Encoder", "Very compute-efficient"],
+    ["Prefix LM", "Continuation from a prefix", "Decoder / hybrid", "Unifies understand + generate"],
+    ["Permutation LM", "Tokens in random order", "Decoder (special)", "Bidirectional, no [MASK]"],
+  ]}
+  caption="Seven self-supervised objectives, their architectures, and strengths."
+/>
+
+## The pre-train / fine-tune mismatch
+
+A recurring subtlety across objectives is the gap between how a model is *pre-trained* and how it is *used*. BERT's MLM is the clearest case: during pre-training the model constantly sees the artificial `[MASK]` token, but at fine-tuning and inference there is no `[MASK]` anywhere. The model is, in a sense, trained on inputs that never occur in practice. BERT's 80/10/10 trick (replace only 80% of chosen tokens with `[MASK]`, 10% with a random word, 10% unchanged) partially closes this gap, and XLNet's permutation language modelling was explicitly designed to avoid it entirely by never introducing a mask token at all.
+
+Causal LM has far less of this problem, which is one underrated reason it scaled so gracefully. A GPT model is pre-trained to continue text and *used* to continue text — the training and inference distributions match. There is no special token that appears only during training. This alignment between objective and use is part of why decoder-only models flowed so naturally into in-context learning: prompting is just continuation, the very thing the model was trained to do. When you evaluate a pre-training objective, asking "how closely does training resemble deployment?" is as important as asking "how much signal does each example provide?" The best objectives are both efficient and faithful to how the model will actually be used.
+
+## Objectives shape which capabilities emerge
+
+The pre-training objective does not just set raw quality; it biases *which* abilities a model develops. Causal LM, by forcing the model to predict continuations of arbitrary text, pushes it toward planning, coherence over long spans, and the latent task-following that becomes in-context learning. Masked LM, by asking for locally-consistent fill-ins, pushes toward strong local semantic and syntactic representations ideal for tagging and classification but does little to encourage long-range generation.
+
+This is why the same parameter count under different objectives yields models with different personalities. A 1-billion-parameter MLM encoder and a 1-billion-parameter CLM decoder are both "1B models," yet one is a representation machine and the other a generation machine, because their objectives rewarded different competencies. As the field chased emergent reasoning and in-context learning — abilities that require generating and chaining intermediate steps — the causal objective's bias toward generation made decoder-only models the natural vehicle. The objective is, in effect, a prior over what the model will become, and choosing it is choosing which capabilities you are betting will emerge with scale.
+
+## Data, deduplication, and the role of curriculum
+
+Objectives operate on data, and the data pipeline quietly shapes what the objective can teach. Two factors stand out. First, **deduplication**: training corpora contain enormous redundancy — the same boilerplate, quotes, and articles repeated across the web — and removing duplicates reliably improves models and reduces memorization of verbatim text. A self-supervised objective will dutifully memorize anything it sees often enough, so what you let it see repeatedly matters.
+
+Second, the **mixture and ordering** of data. Models trained on a blend of web text, books, code, and academic papers acquire broader capabilities than models trained on web text alone; in particular, including code in pre-training data has been observed to improve reasoning even on non-code tasks, an intriguing transfer effect. Some training regimes also use a rough **curriculum**, shifting the data mixture over training — for instance, emphasizing higher-quality sources toward the end. None of this changes the objective's mathematical form, but it changes what the objective extracts. The lesson, consistent from Phase 1 onward, is that a pre-training run is a partnership between an objective and a corpus: the objective defines *how* to learn from each example, and the corpus defines *what* there is to learn. Improving either improves the model, and the largest recent gains have come as much from better data as from new objectives.
+
+## Pre-training is not the end of training
+
+It is worth flagging that the pre-training objective is only the *first* stage of a modern model's training pipeline, even though it does the heavy lifting of learning language. After pre-training with CLM or MLM, models typically undergo further stages: **continued pre-training** on domain-specific data (medical, legal, code) to specialize them, **supervised fine-tuning** on instruction-response pairs to make them follow commands (Topic 25), and **preference optimization** with RLHF or DPO to align them with human values (Topics 26-27). Each stage uses its own objective, and each builds on the broad competence the pre-training objective installed.
+
+This staged view matters because it locates pre-training correctly: it is where the model learns *language and world knowledge* from raw text at massive scale, but not where it learns to be helpful, harmless, or instruction-following. A freshly pre-trained model is a powerful but unruly text-continuer. The objectives in this topic are the foundation; the alignment objectives ahead are what turn that foundation into something you can actually deploy as an assistant. Keeping the stages distinct in your mind prevents a common confusion — attributing an aligned model's helpfulness to pre-training, when in fact it comes from the later stages applied on top.
+
+## Code Example
+
+The code implements both core losses from scratch on a toy batch: the causal LM loss with a shifted target, and the MLM masking strategy with BERT's 80/10/10 rule and a loss computed only on masked positions.
+
+<CodeBlock lang="python" filename="pretrain_losses.py" code={`# pretrain_losses.py
+# pip install torch
+import torch
+import torch.nn.functional as F
+
+vocab, n = 50, 8
+logits = torch.randn(1, n, vocab)        # pretend model outputs
+tokens = torch.randint(0, vocab, (1, n)) # input token ids
+
+# --- Causal LM loss: predict token t from tokens < t ---
+# shift: logits[:, :-1] predict tokens[:, 1:]
+clm_loss = F.cross_entropy(
+    logits[:, :-1].reshape(-1, vocab),
+    tokens[:, 1:].reshape(-1),
+)
+print("CLM loss (all positions):", round(clm_loss.item(), 3))
+
+# --- MLM masking with the 80/10/10 rule ---
+MASK_ID = 0
+labels = tokens.clone()
+prob = torch.full(tokens.shape, 0.15)
+masked = torch.bernoulli(prob).bool()          # ~15% chosen
+labels[~masked] = -100                          # loss ignores unmasked (-100)
+
+# of the chosen: 80% -> [MASK], 10% -> random, 10% -> unchanged
+inp = tokens.clone()
+r = torch.rand(tokens.shape)
+inp[masked & (r < 0.8)] = MASK_ID
+rand_pos = masked & (r >= 0.8) & (r < 0.9)
+inp[rand_pos] = torch.randint(0, vocab, (int(rand_pos.sum()),))
+
+# MLM loss computed ONLY on masked positions (ignore_index=-100)
+mlm_loss = F.cross_entropy(logits.reshape(-1, vocab), labels.reshape(-1),
+                           ignore_index=-100)
+print("masked positions:", int(masked.sum().item()), "of", n)
+print("MLM loss (masked only):", round(mlm_loss.item(), 3))
+
+# Expected (values vary):
+# CLM loss (all positions): ~3.9
+# masked positions: 1 of 8
+# MLM loss (masked only): ~3.9
+`} />
+
+The two losses make the formulas concrete. The CLM loss shifts logits and targets by one and computes cross-entropy over *every* position. The MLM loss applies the 80/10/10 corruption, sets the labels of unmasked tokens to the ignore index (`-100`), and computes cross-entropy over *only* the masked positions — exactly the `t ∈ M` sum from the math. Run it and you see MLM trains on a fraction of the tokens, the root of its sample inefficiency.
+
+<KeyTakeaways phase={3}>
+- Pre-training objectives are **self-supervised**: they manufacture labels from raw text by hiding part of it, scaling to unlimited data.
+- **CLM** (GPT) predicts the next token from left context over *all* positions — generative and sample-efficient.
+- **MLM** (BERT) predicts masked tokens from *bidirectional* context but only over the masked subset — great for understanding, sample-inefficient.
+- **NSP** was dropped by RoBERTa as unhelpful; **span corruption** (T5) suits encoder-decoders; **ELECTRA's** replaced-token-detection is far more compute-efficient.
+- The loss formulas differ in what you **sum over** (all vs masked tokens → efficiency) and what you **condition on** (left vs bidirectional → generation vs understanding).
+- Architecture and objective are chosen **together**: causal+CLM, bidirectional+MLM, two-stacks+span corruption.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Why is ELECTRA more compute-efficient than BERT's MLM?",
+    options: ["It uses a smaller vocabulary", "Its replaced-token-detection loss is computed over ALL tokens, not just the 15% masked", "It skips pre-training", "It has no attention"],
+    correctIndex: 1,
+    explanation: "MLM only computes loss on the ~15% masked tokens. ELECTRA classifies every token as real or replaced, so the training signal covers the whole sequence, extracting far more learning per forward pass."
+  },
+  {
+    question: "What is the key difference between the CLM and MLM losses?",
+    options: ["CLM has no loss", "CLM conditions on left context and sums over all positions; MLM conditions on bidirectional context but sums over only masked positions", "They are identical", "MLM predicts the next token"],
+    correctIndex: 1,
+    explanation: "CLM predicts each token from its predecessors (all positions contribute), while MLM predicts only masked tokens using full surrounding context. This explains MLM's bidirectionality and its sample inefficiency."
+  },
+  {
+    question: "Why did RoBERTa remove Next Sentence Prediction?",
+    options: ["It was too slow", "Removing it and training MLM longer on more data gave better results — NSP added little", "It required labels", "It broke the architecture"],
+    correctIndex: 1,
+    explanation: "RoBERTa's ablations showed NSP was largely unhelpful; dropping it and training the MLM objective longer on more data improved downstream performance."
+  }
+]} />
+
+## What's Next
+
+We know *how* models are trained. The next question is *how big* and *on how much data* — and whether bigger reliably means better. In **Scaling Laws & Emergent Abilities**, we study the power laws that predict model performance from scale and the Chinchilla result that overturned how labs allocate compute.

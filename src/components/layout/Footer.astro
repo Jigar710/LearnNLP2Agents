@@ -1,0 +1,82 @@
+---
+/**
+ * Footer (PRD §4.3) — site-wide footer with logo, quick links, and copyright.
+ */
+import Logo from './Logo.astro';
+import { withBase } from '../../utils/base';
+
+const GITHUB_URL = 'https://github.com/Jigar710/LearnNLP2Agents';
+const year = new Date().getFullYear();
+---
+
+<footer class="site-footer" data-pagefind-ignore>
+  <div class="site-footer-inner">
+    <div class="footer-brand">
+      <a href={withBase('/')} aria-label="NLP to Agents — home"><Logo /></a>
+      <p class="footer-tagline">NLP to Agentic AI — beginner to advanced, step by step, free forever.</p>
+    </div>
+
+    <nav class="footer-links" aria-label="Footer">
+      <a href={withBase('/curriculum')}>Curriculum</a>
+      <a href={withBase('/glossary')}>Glossary</a>
+      <a href={withBase('/topic/intro-to-nlp')}>Start Learning</a>
+      <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
+    </nav>
+  </div>
+
+  <div class="footer-bottom">
+    <span>© {year} NLP to Agents · 48 Topics · 5 Phases · 100% Free</span>
+    <span>Built with Astro + ❤️</span>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    margin-top: 4rem;
+  }
+  .site-footer-inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 1.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .footer-brand {
+    max-width: 360px;
+  }
+  .footer-tagline {
+    margin: 0.75rem 0 0;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+  }
+  .footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.25rem;
+    font-size: 0.875rem;
+  }
+  .footer-links a {
+    color: var(--text-secondary);
+  }
+  .footer-links a:hover {
+    color: var(--link-color);
+  }
+  .footer-bottom {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 1rem 1.5rem 2rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    justify-content: space-between;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border-subtle);
+  }
+</style>

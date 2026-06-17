@@ -1,0 +1,184 @@
+---
+title: "Instruction Tuning & FLAN"
+subtitle: "Teaching LLMs to follow instructions through supervised fine-tuning"
+phase: 3
+topicNumber: 25
+slug: "instruction-tuning-flan"
+readingTime: 13
+prerequisites: ["gpt-autoregressive-lm"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('instruction-tuning-flan');
+
+<TopicHero topic={topic} />
+
+A freshly pre-trained language model is a brilliant **text continuer** and a poor **assistant**. Ask raw GPT-3 "What is the capital of France?" and it might continue with more questions, or a list of trivia, rather than answering — because it was trained to predict plausible continuations of internet text, not to follow instructions. **Instruction tuning** closes this gap with a simple, supervised idea: fine-tune the model on a large collection of (instruction, response) pairs so it learns the general behaviour of *doing what it is told*. This topic explains instruction tuning, the influential FLAN work that showed it enables generalization to unseen tasks, and the synthetic-data techniques (Self-Instruct, Alpaca) that made it accessible to everyone.
+
+Instruction tuning is the first of three alignment stages (the others, RLHF and DPO, follow). It is the cheapest and most impactful: a modest amount of well-chosen instruction data transforms a raw model into something that feels like an assistant.
+
+## The problem: completion is not instruction-following
+
+Pre-training optimizes next-token prediction over raw text. That text contains questions followed by more text, instructions buried in tutorials, and every other pattern — but the model has no special bias toward *the user's intent*. Prompted with a task, a raw model often produces something locally plausible yet unhelpful: it continues the prompt, asks clarifying questions it then answers itself, or drifts off topic. The capability to perform the task is latent in the weights (we saw in-context learning in Topic 20), but the *disposition* to respond helpfully when asked is missing. Instruction tuning installs that disposition.
+
+## The instruction-tuning idea
+
+The recipe is supervised fine-tuning on examples of the desired behaviour. Each training example is an instruction (optionally with input) paired with a high-quality response: "Summarize this article: ... → A concise summary." "Translate to French: Good morning → Bonjour." "Classify the sentiment: I loved it → Positive." Train the pre-trained model to produce the response given the instruction, across many diverse tasks, and it learns the *general skill* of following instructions — not just the specific tasks in the data, but the meta-behaviour of mapping a request to a helpful answer.
+
+<Callout type="tip">
+Instruction tuning does not teach the model new knowledge so much as new *behaviour*. The facts and skills were learned in pre-training; instruction tuning teaches the model to surface them in response to instructions rather than to merely continue text.
+</Callout>
+
+## FLAN: instruction tuning unlocks generalization
+
+Google's **FLAN** (Finetuned Language Net, Wei et al. 2021) made the key discovery: if you instruction-tune on a *diverse enough* set of tasks, the model generalizes to **unseen** task types. FLAN took a pre-trained model and fine-tuned it on 60-plus existing NLP datasets, each reformatted as natural-language instructions with varied phrasings. The striking result: on tasks *held out* of training entirely, the instruction-tuned model substantially outperformed the raw model in zero-shot settings. Training on many tasks taught a transferable skill — "follow instructions" — that applied to tasks never seen during tuning.
+
+## Cross-task generalization and Flan-T5
+
+This **cross-task generalization** is the heart of why instruction tuning works. By seeing the same underlying skill (answer a question, summarize, classify) expressed through hundreds of instruction phrasings across dozens of datasets, the model abstracts the general pattern. **Flan-T5**, which instruction-tuned the T5 model on an even larger task mixture, became a standout: a relatively small Flan-T5 outperformed much larger raw models on many zero-shot benchmarks. The result reinforced a theme from scaling laws — *how* you train can rival *how big* you make the model.
+
+## Self-Instruct, Alpaca, and democratized instruction data
+
+FLAN used existing labelled datasets, but high-quality instruction data is expensive to write. **Self-Instruct** (Wang et al. 2022) showed you can *generate* it: prompt a capable model to produce new instructions and responses, filter for quality, and use the synthetic data to instruction-tune another model. This bootstrapping made instruction data cheap.
+
+**Alpaca** famously applied this: it used a strong model to generate about 52,000 instruction-response pairs and fine-tuned a small LLaMA on them, producing a surprisingly capable instruction-follower for a few hundred dollars. **Vicuna** fine-tuned on real ChatGPT conversations. These projects, along with datasets like OpenOrca, Dolly, and ShareGPT, kicked off an explosion of open instruction-tuned models, proving that the behaviour could be cheaply transferred.
+
+<Callout type="warning" title="Synthetic data inherits its source's flaws">
+Generating instruction data from a strong model is powerful but copies that model's biases, errors, and style — and may violate its terms of use. Quality filtering matters, and synthetic data is a complement to, not a full replacement for, carefully curated human data.
+</Callout>
+
+## Quality over quantity
+
+A consistent finding is that instruction-tuning data **quality matters more than quantity**. The LIMA work ("Less Is More for Alignment") showed that as few as 1,000 carefully-curated, high-quality examples could produce a strong instruction-follower, because pre-training already installed the capabilities and instruction tuning only needs to *elicit* the right behaviour. A small set of diverse, clean, well-written examples often beats a huge set of noisy ones. This is good news for practitioners: you do not need millions of examples, you need a few thousand excellent ones.
+
+## Connection to RLHF
+
+Instruction tuning is **Stage 1** of the broader alignment pipeline. It is also called **Supervised Fine-Tuning (SFT)** in that context. SFT teaches the model to follow instructions and produce reasonable responses; the next stages, reward modelling and RLHF (Topic 26) or DPO (Topic 27), refine *which* responses humans prefer when several are plausible. SFT gets you most of the way to a useful assistant; preference optimization polishes the rest.
+
+## Templates, chat formats, and special tokens
+
+A practical detail that has outsized importance: instruction-tuned models learn a specific **prompt template**, and using the wrong one at inference quietly degrades quality. During tuning, every example is wrapped in a consistent format — perhaps "### Instruction:\\n...\\n\\n### Response:\\n..." or a chat format with role markers. The model learns to recognize that structure as the cue to switch from "continue text" mode into "respond helpfully" mode. If you then prompt it with a *different* format, you are giving it an input distribution it never trained on, and it may revert to raw-completion behaviour.
+
+This is why every instruction-tuned and chat model ships with an official **chat template**, and why libraries provide a `apply_chat_template` helper that inserts the exact role markers and special tokens the model expects. Modern chat models use dedicated special tokens to delimit turns and roles — markers for the start and end of a user turn, an assistant turn, and a system message. Respecting the template is not optional polish; it is the difference between a model that follows instructions crisply and one that rambles. When a capable model seems to behave worse than expected, a mismatched or hand-rolled prompt format is one of the first things to check.
+
+## What instruction tuning can and cannot do
+
+It helps to be precise about the limits, because instruction tuning is often over-credited. It can reliably teach a model to *recognize and respond to* instructions, to adopt a helpful format and tone, and to surface capabilities the pre-trained model already possesses. What it largely *cannot* do is install knowledge or skills that were absent from pre-training. If the base model never learned a fact or never saw a programming language, a few thousand instruction examples will not teach it; the examples are too few to convey substantial new knowledge, and that is not their purpose.
+
+This separation of concerns — pre-training installs *capability*, instruction tuning installs *behaviour* — is one of the most clarifying mental models in the whole alignment story. It explains why instruction tuning is so data-efficient (it is eliciting, not teaching from scratch), why a weak base model cannot be instruction-tuned into a strong one, and why improving an assistant often means improving the *base* model rather than adding more instruction data. When you diagnose a model that follows instructions politely but gets the substance wrong, the fix usually lies upstream in pre-training or in retrieval (Phase 4), not in more instruction tuning. Knowing which lever addresses which failure mode saves enormous wasted effort.
+
+## Multi-turn dialogue and system prompts
+
+Real assistants do not answer one isolated instruction; they hold **multi-turn conversations** and obey a **system prompt** that sets persistent behaviour. Instruction tuning extends naturally to both. For multi-turn ability, the tuning data includes whole conversations — a sequence of user and assistant turns — so the model learns to attend to dialogue history and stay coherent across turns rather than treating each message in isolation. The causal attention you studied lets later turns condition on everything earlier in the conversation.
+
+The **system prompt** is a special message, usually placed first, that establishes the assistant's role, constraints, and tone for the entire conversation ("You are a helpful, concise coding assistant"). Models are tuned to give system instructions higher priority than ordinary user turns, which is what lets an application developer shape behaviour globally while users interact normally. This priority structure — system above user — is also a frontline of safety and security, because it determines whether a user can override the developer's instructions, a tension we revisit when discussing prompt injection in the agents phase. For now, the takeaway is that instruction tuning is what teaches a model to use these conversational structures at all: the roles, the turn-taking, and the special status of the system prompt are behaviours installed during tuning, layered on top of the raw next-token predictor that pre-training produced.
+
+## Catastrophic forgetting and the alignment tax
+
+Fine-tuning carries a risk worth naming: **catastrophic forgetting**, where adapting a model to new behaviour erodes capabilities it previously had. Push instruction tuning too hard — too many epochs, too narrow a dataset — and the model can lose some of the breadth and raw knowledge it gained in pre-training, becoming a fluent instruction-follower that is subtly less capable underneath. This is one reason instruction-tuning data is kept diverse and the training is kept light: you want to *redirect* behaviour, not overwrite competence.
+
+A related phenomenon is the **alignment tax** — the observation that making a model more helpful, harmless, and instruction-following sometimes costs a little raw benchmark performance. A model tuned to refuse unsafe requests and to format answers helpfully may score marginally lower on a pure capability test than its unaligned base. In practice the trade is overwhelmingly worth it, because an unaligned model that cannot follow instructions is far less useful regardless of its benchmark numbers, and good alignment techniques keep the tax small. Still, being aware of both effects shapes sensible practice: tune lightly on diverse, high-quality data, monitor for regressions on capability benchmarks as well as instruction-following, and treat alignment as a careful balance rather than a free lunch. These same concerns intensify in the reinforcement-learning stages ahead, where the optimization pressure on behaviour is stronger still.
+
+## Code Example
+
+The code shows the instruction-tuning pattern: format (instruction, response) pairs into a single training text, and fine-tune a small causal LM with the HuggingFace `Trainer`. The structure is identical at any scale.
+
+<CodeBlock lang="python" filename="instruction_tune.py" code={`# instruction_tune.py
+# pip install transformers datasets torch
+from transformers import (AutoTokenizer, AutoModelForCausalLM,
+                          Trainer, TrainingArguments, DataCollatorForLanguageModeling)
+from datasets import Dataset
+
+# 1) A tiny instruction dataset (in practice: thousands of diverse pairs)
+pairs = [
+    {"instruction": "Translate to French: Good morning", "response": "Bonjour"},
+    {"instruction": "Summarize: The cat sat on the mat all day.",
+     "response": "A cat rested on a mat."},
+    {"instruction": "Classify sentiment: I loved this film.", "response": "Positive"},
+]
+
+# 2) Format each pair into one instruction-following text
+TEMPLATE = "### Instruction:\\n{instruction}\\n\\n### Response:\\n{response}"
+texts = [TEMPLATE.format(**p) + tok_eos for p in pairs] if False else None
+
+model_name = "distilgpt2"
+tok = AutoTokenizer.from_pretrained(model_name)
+tok.pad_token = tok.eos_token
+def fmt(p):
+    return {"text": TEMPLATE.format(**p) + tok.eos_token}
+ds = Dataset.from_list(pairs).map(fmt)
+ds = ds.map(lambda e: tok(e["text"], truncation=True, max_length=128),
+            remove_columns=ds.column_names)
+
+# 3) Fine-tune with the standard causal-LM Trainer
+model = AutoModelForCausalLM.from_pretrained(model_name)
+args = TrainingArguments(output_dir="out", num_train_epochs=3,
+                         per_device_train_batch_size=2, logging_steps=1,
+                         report_to=[])
+trainer = Trainer(model=model, args=args, train_dataset=ds,
+                  data_collator=DataCollatorForLanguageModeling(tok, mlm=False))
+trainer.train()
+
+# After tuning, the model continues the "### Response:" with the answer.
+prompt = "### Instruction:\\nTranslate to French: Thank you\\n\\n### Response:\\n"
+ids = tok(prompt, return_tensors="pt").input_ids
+print(tok.decode(model.generate(ids, max_new_tokens=10)[0]))
+
+# Expected: the model produces a response after '### Response:'
+# (quality depends on data size; this toy run just shows the mechanics).
+`} />
+
+The mechanics are the same as any causal-LM fine-tuning — the only special ingredient is the *format*: a consistent instruction/response template that the model learns to complete. At scale, with thousands of diverse, high-quality pairs, this exact procedure turns a raw text-continuer into an instruction-following assistant. Everything after this — RLHF, DPO — refines the *preferences*; instruction tuning installs the basic behaviour.
+
+<PaperLink
+  title="Finetuned Language Models Are Zero-Shot Learners (FLAN)"
+  authors="Wei, Bosma, Zhao, et al."
+  year={2021}
+  venue="ICLR"
+  url="https://arxiv.org/abs/2109.01652"
+/>
+
+<KeyTakeaways phase={3}>
+- A pre-trained model **continues text** but does not naturally **follow instructions**; the capability is latent, the disposition is missing.
+- **Instruction tuning** fine-tunes on (instruction, response) pairs, teaching the general behaviour of mapping a request to a helpful answer.
+- **FLAN** showed that tuning on a *diverse* set of tasks yields **cross-task generalization** to unseen task types; **Flan-T5** beat much larger raw models.
+- **Self-Instruct** and **Alpaca** generate synthetic instruction data cheaply, democratizing instruction-tuned models — but synthetic data inherits its source's flaws.
+- **Quality beats quantity**: a few thousand clean, diverse examples (even ~1,000, per LIMA) can suffice, because pre-training already installed the skills.
+- Instruction tuning (a.k.a. **SFT**) is Stage 1 of alignment; RLHF and DPO refine which responses humans prefer.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Why does instruction tuning on ~60 diverse tasks improve performance on UNSEEN tasks?",
+    options: ["It memorizes every possible task", "The model abstracts the general skill of following instructions, which transfers (cross-task generalization)", "It increases the vocabulary", "It adds new parameters"],
+    correctIndex: 1,
+    explanation: "Seeing the same underlying behaviour across many tasks and phrasings teaches a transferable meta-skill — 'follow the instruction' — that generalizes to task types never seen during tuning."
+  },
+  {
+    question: "What does instruction tuning primarily change about a model?",
+    options: ["Its factual knowledge", "Its behaviour — eliciting helpful responses to instructions rather than mere text continuation", "Its tokenizer", "Its number of layers"],
+    correctIndex: 1,
+    explanation: "The knowledge and skills come from pre-training; instruction tuning teaches the model to surface them in response to instructions, changing behaviour rather than adding knowledge."
+  },
+  {
+    question: "What did the LIMA result suggest about instruction-tuning data?",
+    options: ["Millions of examples are required", "Quality matters more than quantity — even ~1,000 curated examples can work well", "Synthetic data is always best", "Data quality is irrelevant"],
+    correctIndex: 1,
+    explanation: "LIMA showed a small set of high-quality, diverse examples can produce a strong instruction-follower, because pre-training already installed the capabilities and tuning mainly elicits the right behaviour."
+  }
+]} />
+
+## What's Next
+
+Instruction tuning makes a model follow instructions, but when several responses are all plausible, which should it prefer? Teaching that requires human preferences. In **RLHF — Reward Modeling & PPO**, we study the reinforcement-learning pipeline that aligned ChatGPT to human values.

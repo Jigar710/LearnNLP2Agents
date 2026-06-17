@@ -1,0 +1,172 @@
+---
+title: "Agent Memory — Buffer, Summary, Entity & Vector"
+subtitle: "Giving agents the ability to remember across turns and sessions"
+phase: 5
+topicNumber: 44
+slug: "agent-memory"
+readingTime: 15
+prerequisites: ["langgraph"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+
+export const topic = getTopicBySlug('agent-memory');
+
+<TopicHero topic={topic} />
+
+LLMs are **stateless** — each API call starts fresh, with no memory of prior interactions beyond what you put in the prompt. Yet a useful agent must remember: the conversation so far, facts about the user, the results of earlier steps, lessons from past sessions. **Agent memory** is the set of techniques for giving a stateless model continuity, and it is what separates a goldfish-like chatbot that forgets every turn from an assistant that builds understanding over time. This topic covers the spectrum of memory types — buffer, window, summary, entity, and vector — the short-term/long-term distinction, and how to architect memory for production agents.
+
+Memory is also a *constraint* problem. The context window is finite, so you cannot simply remember everything by stuffing it all into the prompt. Memory techniques are really strategies for deciding *what* to keep, *what* to compress, and *what* to retrieve when needed.
+
+## Why memory matters
+
+Because the model is stateless, *all* continuity must come from what you include in the prompt. The simplest memory is just including the conversation history — but as a conversation or task grows long, the history outgrows the context window, costs more on every call, and dilutes the model's focus. So memory is not just "remember everything"; it is the art of maintaining useful continuity within a finite context budget. Every memory type is a different answer to "what do I keep in the prompt, and how?"
+
+## Conversation buffer and buffer window
+
+The most basic memory is the **conversation buffer**: keep the full history of messages and include all of it in every prompt. Simple and complete, but it grows without bound and eventually overflows the context window — fine for short interactions, unworkable for long ones. The **buffer window** fixes the overflow by keeping only the last `K` turns, sliding the window forward as the conversation grows. This bounds the size but *forgets* anything older than `K` turns — the agent will not remember what you said early in a long conversation. It trades completeness for a fixed budget.
+
+## Summary memory
+
+**Conversation summary** memory addresses the window's forgetting by *compressing* old history instead of dropping it. As the conversation grows, older turns are summarized by an LLM into a running summary, which is included in the prompt along with recent verbatim turns. This keeps the gist of the entire conversation in a small space — the agent remembers that you discussed a refund earlier without keeping every word of that exchange. The trade-off is that summarization is lossy (details are lost) and costs extra LLM calls, but it is the standard way to maintain long-conversation continuity within a budget.
+
+<Callout type="tip">
+The progression mirrors a trade-off curve: buffer remembers everything but overflows; window bounds size but forgets the old; summary compresses the old to keep the gist within budget. Most production agents use a hybrid — recent turns verbatim plus a running summary of the rest.
+</Callout>
+
+## Entity and vector memory
+
+Two more specialized types. **Entity memory** extracts and tracks specific *entities* mentioned in the conversation — the user's name, their preferences, key facts — maintaining a structured store ("user prefers window seats," "project deadline is Friday") that is included or retrieved as relevant. It is precise memory for the facts that matter. **Vector store memory** treats memory like RAG: embed past messages or facts, store them in a vector database, and *retrieve* the most relevant ones for the current query rather than including all history. This scales to effectively unlimited memory — you can store thousands of past interactions and pull back only the handful relevant to now — and is the basis of long-term memory across sessions.
+
+## Short-term vs long-term memory
+
+A crucial distinction. **Short-term memory** is within a single task or conversation — the working context the agent needs right now (buffer, window, summary, the LangGraph state from Topic 43). **Long-term memory** persists *across* sessions and tasks — what the agent remembers about a user or learned from past work, stored externally (a database, a vector store, files) and retrieved when relevant. Short-term memory lives in the context window; long-term memory lives outside it and is fetched in. A complete agent needs both: a working memory for the current task and a durable memory that makes it smarter over time.
+
+## Memory in frameworks
+
+The frameworks provide memory primitives. LangChain historically offered memory classes (`ConversationBufferMemory`, `ConversationSummaryMemory`, and so on), though the modern approach favours explicit state management. LangGraph's **checkpointer** (Topic 43) is short-term memory — it persists the graph state, so a conversation's history survives across calls within a thread. For long-term, cross-session memory, you layer a store (often vector-based) that the agent reads from and writes to. The trend is toward explicit, inspectable memory you control rather than hidden framework magic.
+
+## Episodic, semantic, and procedural memory
+
+Borrowing from cognitive science, agent memory is sometimes categorized as **episodic** (specific past experiences — "last time, the user asked about X"), **semantic** (general facts and knowledge — "the user is a premium customer"), and **procedural** (how to do things — learned skills or instructions). Sophisticated agents maintain all three: a log of past episodes to learn from, a knowledge base of facts, and a repertoire of procedures. This framing helps you design what an agent should remember and how to organize it, especially for agents meant to improve over many sessions.
+
+## The memory-context tradeoff
+
+The unifying theme is a tradeoff: the context window is finite and every token costs money and dilutes focus, so you cannot remember everything by inclusion. Memory design is deciding **what to keep verbatim** (recent, critical), **what to compress** (older history → summary), **what to externalize and retrieve** (long-term facts → vector store), and **what to discard** (irrelevant clutter). Get this right and the agent has the continuity it needs without drowning in its own history; get it wrong and it either forgets what matters or chokes on what does not. This is the same context-management problem that recurs throughout agent design, here framed as memory.
+
+## Writing to long-term memory: the harder half
+
+Most memory discussions focus on *reading* — what to retrieve into the prompt — but the harder and more neglected problem is *writing*: deciding what is worth remembering in the first place. An agent that saves everything to long-term memory accumulates noise that pollutes future retrievals; an agent that saves nothing never learns. Good long-term memory requires a *write policy*: after an interaction, the agent (or a background process) decides what is durable and important enough to persist — a stable user preference, a key fact, a lesson from a failure — and discards the ephemeral chatter.
+
+This write step is itself often an LLM task: prompt a model to extract the salient, lasting facts from a conversation and store those, rather than dumping raw transcripts. It also requires handling *updates* and *contradictions* — if the user previously said they preferred email but now says they prefer Slack, the memory must be updated, not merely appended, or the agent will hold conflicting beliefs. Some systems periodically *consolidate* memory, merging and deduplicating accumulated facts the way human memory consolidates during sleep. The asymmetry is worth internalizing: reading from memory is a retrieval problem you already understand from RAG, but writing to memory well is a curation problem — what to save, how to update it, when to forget — and it is where naive memory systems most often go wrong, slowly filling with stale, redundant, or contradictory information that degrades rather than improves the agent over time.
+
+## Context engineering: the broader frame
+
+Memory is one facet of a broader discipline that has come to be called **context engineering**: the deliberate management of everything that goes into the model's context window at each step. An agent's context at any moment is assembled from several sources — the system prompt and instructions, the tools available, retrieved knowledge (RAG), the conversation history (short-term memory), retrieved long-term facts, and the current task state. Context engineering is the practice of assembling these elements so the model has exactly what it needs to act well, and no more.
+
+This reframing unifies much of what this phase has covered. Prompt engineering, RAG, and memory are all *sources* feeding the context; the agent loop *updates* the context each step; and the finite window forces *prioritization* among them. Viewing the problem as context engineering — rather than as separate concerns of prompting, retrieval, and memory — clarifies the central challenge of building capable agents: an agent is only as good as the context it reasons over, and curating that context dynamically, step after step, is the core craft. As context windows grow and agents tackle longer tasks, this discipline only becomes more important, because more capacity means more decisions about what deserves a place in the agent's limited attention. The best agent engineers think constantly about what is in the context, why it is there, and what should be added, compressed, retrieved, or removed — and memory is simply the part of that craft concerned with continuity over time.
+
+## Memory, privacy, and safety
+
+Persisting what an agent learns about users raises real responsibilities that a complete treatment cannot skip. Long-term memory often contains personal or sensitive information — names, preferences, history, sometimes far more — and storing it creates obligations around privacy, security, and user control. Users should be able to see what an agent remembers about them, correct it, and delete it; sensitive data should be stored securely and access-controlled; and regulations may govern what can be retained and for how long. An agent that silently accumulates a detailed dossier on its users without their knowledge or consent is a liability, however helpful the memory makes it.
+
+There are safety dimensions too. Memory can be a vector for *persistence* of an attack: if an agent can be manipulated (via prompt injection) into writing false or malicious content to its long-term memory, that poisoned memory can affect every future interaction, a more durable compromise than a single bad turn. So the write path to memory deserves the same untrusted-input scrutiny as tool outputs (Topic 41) — validate what gets persisted, and do not let untrusted content silently become durable "facts" the agent trusts. Designing memory responsibly means treating it not just as a capability that makes agents smarter but as a store of potentially sensitive data and a potential attack surface, with the controls, transparency, and validation that such a store demands. As agents become more capable and more persistent, getting this right shifts from a nicety to a requirement, and it connects directly to the safety and production concerns that close this phase.
+
+## Code Example
+
+The code demonstrates three memory strategies on a conversation: a buffer window (last K turns), a running summary of older turns, and vector-store retrieval of relevant past messages.
+
+<CodeBlock lang="python" filename="agent_memory.py" code={`# agent_memory.py
+# pip install anthropic sentence-transformers numpy
+import os, numpy as np
+from anthropic import Anthropic
+from sentence_transformers import SentenceTransformer
+
+client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+conversation = [
+    ("user", "Hi, I'm Maria and I manage the Phoenix project."),
+    ("assistant", "Hello Maria! How can I help with Phoenix?"),
+    ("user", "We use Python and deploy on AWS."),
+    ("assistant", "Got it — Python on AWS."),
+    ("user", "The deadline is next Friday."),
+    ("assistant", "Noted, deadline next Friday."),
+]
+
+# --- 1) Buffer window: keep only the last K turns ---
+K = 2
+window = conversation[-K*2:]              # last K user+assistant pairs
+print("WINDOW (last K):", [m[1][:30] for m in window])
+
+# --- 2) Summary memory: compress older turns into a running summary ---
+older = conversation[:-K*2]
+summary_prompt = "Summarize these facts in one sentence:\\n" + \\
+    "\\n".join(f"{r}: {t}" for r, t in older)
+summary = client.messages.create(
+    model="claude-opus-4-8", max_tokens=80,
+    messages=[{"role": "user", "content": summary_prompt}],
+).content[0].text
+print("SUMMARY of older turns:", summary)
+
+# --- 3) Vector memory: retrieve the most relevant past message ---
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
+texts = [t for _, t in conversation]
+vecs = embedder.encode(texts, normalize_embeddings=True)
+query = "What deadline did Maria mention?"
+qv = embedder.encode([query], normalize_embeddings=True)
+best = texts[int(np.argmax(vecs @ qv.T))]
+print("VECTOR-retrieved memory:", best)
+
+# A production agent combines these: recent turns verbatim (window) +
+# a running summary of the rest + vector retrieval for long-term facts.
+
+# Expected:
+# WINDOW (last K): ['The deadline is next Friday.', 'Noted, deadline next Friday.']
+# SUMMARY of older turns: Maria manages the Phoenix project, using Python on AWS.
+# VECTOR-retrieved memory: The deadline is next Friday.
+`} />
+
+The three strategies show the spectrum: the window keeps recent turns verbatim, the summary compresses older turns into a compact fact, and vector memory retrieves the one past message relevant to a query. A real agent combines all three — recent context in full, a summary of the rest, and vector retrieval for long-term facts across sessions — to maintain rich continuity within a finite context budget. This is the memory architecture behind assistants that actually remember you.
+
+<KeyTakeaways phase={5}>
+- LLMs are **stateless**; all continuity comes from the prompt, so memory is the art of maintaining continuity within a finite context budget.
+- **Buffer** keeps everything (overflows); **buffer window** keeps the last K turns (forgets older); **summary** compresses old history to keep the gist.
+- **Entity memory** tracks specific facts (names, preferences); **vector memory** embeds and retrieves relevant past messages, scaling to effectively unlimited history.
+- **Short-term** memory is the current task's working context (in the window); **long-term** memory persists across sessions externally and is retrieved when relevant.
+- Memory maps to **episodic** (experiences), **semantic** (facts), and **procedural** (skills) types; sophisticated agents maintain all three.
+- Memory design is the **what-to-keep/compress/retrieve/discard** tradeoff against a finite context; production agents combine window + summary + vector retrieval.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "When would you use vector store memory over summary memory?",
+    options: ["Never", "When you need to retrieve specific relevant facts from a large or cross-session history rather than a compressed gist of recent conversation", "Only for short chats", "When the model is small"],
+    correctIndex: 1,
+    explanation: "Vector memory embeds past messages and retrieves the few relevant to the current query, scaling to large, long-term, cross-session memory. Summary memory instead compresses recent history into a gist, losing specific details."
+  },
+  {
+    question: "What problem does the buffer window solve, and what does it sacrifice?",
+    options: ["It solves hallucination but sacrifices speed", "It bounds context size by keeping only the last K turns, but forgets anything older than the window", "It remembers everything forever", "It removes the need for a prompt"],
+    correctIndex: 1,
+    explanation: "Keeping the last K turns caps the prompt size to avoid overflow, but the agent loses access to anything said before the window — the trade-off of completeness for a fixed budget."
+  },
+  {
+    question: "Why is memory fundamentally a tradeoff rather than just 'remember everything'?",
+    options: ["Memory is free", "The context window is finite and every token costs money and dilutes focus, so you must choose what to keep, compress, retrieve, or discard", "Models never forget", "Memory only matters for training"],
+    correctIndex: 1,
+    explanation: "Since all continuity must fit in a finite, costly context window, you cannot include unlimited history. Memory design is deciding what to keep verbatim, compress, externalize and retrieve, or discard."
+  }
+]} />
+
+## What's Next
+
+One agent with memory is powerful, but some problems are best solved by *teams*. In **Multi-Agent Systems & Orchestration**, we study how to coordinate multiple specialized agents — supervisors delegating to workers, agents debating, pipelines passing work — to tackle problems beyond any single agent.

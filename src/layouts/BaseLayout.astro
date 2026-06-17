@@ -1,0 +1,173 @@
+---
+/**
+ * BaseLayout (PRD §10.1 / Step 4.1) — HTML shell for full-width pages
+ * (home, curriculum, phase overviews, glossary, cheatsheets).
+ *
+ * Provides: fonts, meta/OG tags, global + KaTeX CSS, the pre-paint theme init
+ * script (no FOUC), favicon, and the Navbar + Footer chrome.
+ */
+import '../styles/global.css';
+import ThemeInit from '../components/layout/ThemeInit.astro';
+import Navbar from '../components/layout/Navbar.astro';
+import Footer from '../components/layout/Footer.astro';
+import { withBase } from '../utils/base';
+
+interface Props {
+  title: string;
+  description?: string;
+  ogTitle?: string;
+  /** CSS variable string used as the page accent, e.g. "var(--phase-2)". */
+  accent?: string;
+  /** Hide the site footer (e.g. print cheatsheets). */
+  hideFooter?: boolean;
+}
+
+const {
+  title,
+  description = 'Learn NLP to Agentic AI from scratch — step-by-step curriculum covering NLP, Transformers, LLMs, RAG, and Agentic AI, beginner to advanced. Free forever.',
+  ogTitle,
+  accent = 'var(--phase-1)',
+  hideFooter = false,
+} = Astro.props;
+
+const safeTitle = title ?? 'NLP to Agents';
+const pageTitle = safeTitle.includes('NLP to Agents') ? safeTitle : `${safeTitle} | NLP to Agents`;
+const socialTitle = ogTitle ?? title;
+const ogImage = new URL(withBase('/og-image.png'), Astro.site ?? Astro.url).href;
+const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).href;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <ThemeInit />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+
+    <title>{pageTitle}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+
+    <!-- Open Graph / SEO (F10) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={socialTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImage} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={socialTitle} />
+    <meta name="twitter:description" content={description} />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href={withBase('/favicon.svg')} />
+
+    <!-- Google Fonts (§7.2) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+
+  <body style={`--accent: ${accent}`}>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <Navbar />
+    <main id="main-content" class="site-main">
+      <slot />
+    </main>
+    {!hideFooter && <Footer />}
+  </body>
+</html>
+
+<style is:global>
+  .site-main {
+    padding-top: 60px; /* clear the fixed navbar */
+    min-height: calc(100vh - 60px);
+  }
+
+  /* ---- Search modal (rendered by the SearchModal React island) ---- */
+  .search-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(2px);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 12vh 1rem 1rem;
+  }
+  .search-modal {
+    width: min(640px, 100%);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+  }
+  .search-input-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-muted);
+  }
+  .search-input-row input {
+    flex: 1;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 1rem;
+    font-family: var(--font-sans);
+  }
+  .search-esc {
+    font-size: 0.7rem;
+    padding: 2px 7px;
+    border-radius: 5px;
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .search-results {
+    max-height: 50vh;
+    overflow-y: auto;
+    padding: 0.4rem;
+  }
+  .search-hint {
+    padding: 1rem;
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+  }
+  .search-hint code {
+    font-size: 0.78rem;
+  }
+  .search-result {
+    display: block;
+    padding: 0.6rem 0.75rem;
+    border-radius: 8px;
+    color: var(--text-primary);
+  }
+  .search-result.is-active {
+    background: color-mix(in srgb, var(--accent, var(--phase-1)) 14%, transparent);
+  }
+  .search-result-title {
+    display: block;
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+  .search-result-excerpt {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+  .search-result-excerpt mark {
+    background: color-mix(in srgb, var(--accent, var(--phase-1)) 30%, transparent);
+    color: inherit;
+  }
+</style>

@@ -1,0 +1,211 @@
+---
+title: "Text Preprocessing Techniques"
+subtitle: "Cleaning and normalizing text before any model sees it"
+phase: 1
+topicNumber: 4
+slug: "text-preprocessing"
+readingTime: 13
+prerequisites: ["corpus-tokens-vocabulary"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('text-preprocessing');
+
+<TopicHero topic={topic} />
+
+Raw text is messy. It arrives with inconsistent capitalization, stray punctuation, HTML tags, URLs, emoji, contractions, misspellings, and Unicode oddities. Before a model can learn anything useful, that mess usually has to be cleaned and standardized — a stage called **text preprocessing**. It is unglamorous work, but it has an outsized effect on results, and doing it thoughtlessly is one of the most common ways beginners sabotage their own systems.
+
+This topic is a practical tour of the preprocessing toolkit: lowercasing, punctuation handling, stopword removal, stemming, lemmatization, and the special handling that real-world text (tweets, web pages, logs) demands. Crucially, we will treat every technique as a *choice with trade-offs* rather than a mandatory ritual. The right question is never "should I preprocess?" but "does this specific step help *this* model on *this* task?" By the end you will be able to assemble a sensible pipeline and, just as importantly, know when to leave the text alone.
+
+## Why preprocessing matters
+
+The classic justification is "garbage in, garbage out." A count-based model like TF-IDF (Topic 5) treats every distinct token as a separate feature. If "Apple", "apple", and "apple," (with a comma) are three different tokens, the model splits the evidence for a single concept across three features, weakening every one of them. Preprocessing collapses needless variation so that the signal concentrates.
+
+But preprocessing is a double-edged sword. Every normalization step *destroys information*, and sometimes that information mattered. Lowercasing merges "US" (the country) with "us" (the pronoun). Stripping punctuation turns the emotional ":)" into nothing. Removing stopwords deletes the "not" in "not good." The art is removing noise while preserving signal — and what counts as noise depends entirely on the downstream task.
+
+<Callout type="warning" title="Preprocessing is task-dependent">
+There is no universal "correct" preprocessing pipeline. Stopword removal helps keyword search but can wreck sentiment analysis. Lowercasing helps topic classification but hurts named-entity recognition. Always evaluate each step against your actual task and metric.
+</Callout>
+
+## Lowercasing
+
+Lowercasing is the simplest normalization: map every character to lower case so "The", "the", and "THE" become one token. For tasks where case carries little meaning — topic classification, search — it is a cheap win that shrinks the vocabulary.
+
+The danger is that case *does* sometimes carry meaning. "Apple" the company versus "apple" the fruit; "March" the month versus "march" the verb; "US" versus "us." For named-entity recognition, where capitalization is a strong cue that a word is a proper noun, blind lowercasing can measurably hurt performance. Modern subword tokenizers often preserve case for exactly this reason and let the model learn when it matters.
+
+## Punctuation, numbers, and special text
+
+Real text is full of things that are not words. How you treat them is a series of small decisions:
+
+- **Punctuation** — often stripped for bag-of-words models, but punctuation can be meaningful (question marks signal questions; "!!!" signals intensity). Sentiment models frequently keep it.
+- **Numbers** — sometimes replaced with a placeholder token like `<NUM>` so that "I bought 3" and "I bought 7" share structure; sometimes kept, when the exact value matters.
+- **URLs, mentions, hashtags** — in social-media text these are usually normalized to placeholders (`<URL>`, `<USER>`) so the model is not distracted by millions of unique links.
+- **Emoji** — far from noise in sentiment tasks; a 😍 is a strong positive signal. Often kept or mapped to descriptive tokens.
+- **HTML** — almost always stripped, since tags like `<div>` are formatting, not language.
+
+<Callout type="tip">
+Regular expressions are your friend for special text. A few well-tested patterns to replace URLs, mentions, and HTML go a long way — but write them carefully, because a greedy regex can silently eat content you meant to keep.
+</Callout>
+
+## Stopword removal
+
+**Stopwords** are extremely common, low-information words — "the", "is", "and", "of", "a". Because Zipf's Law (Topic 3) guarantees a handful of words dominate every corpus, removing them can shrink your data substantially and let count-based models focus on contentful terms. For information retrieval and keyword extraction, this is often helpful.
+
+For many other tasks it is harmful. Consider sentiment: "not good" and "good" differ only by the stopword "not", and deleting it flips the meaning. Modern neural models, which read full context, almost never benefit from stopword removal — they would rather see the whole sentence. Treat stopword lists as a task-specific tool from the count-based era, not a default.
+
+## Stemming vs Lemmatization
+
+Both stemming and lemmatization reduce inflected words to a common base so that "run", "running", and "ran" can be treated as one. They differ sharply in *how*.
+
+**Stemming** chops off suffixes using crude, language-specific rules. The Porter stemmer turns "running" into "run", "studies" into "studi", and "argument" into "argument". It is fast and requires no dictionary, but it is dumb: it often produces non-words ("studi") and can conflate unrelated terms.
+
+**Lemmatization** maps a word to its dictionary form (its *lemma*) using vocabulary and morphological analysis, usually with part-of-speech information. It correctly turns "studies" into "study", "better" into "good", and "ran" into "run". It is slower and needs a lexicon, but its output is always a real word and is far more accurate.
+
+<ComparisonTable
+  phase={1}
+  headers={["Aspect", "Stemming", "Lemmatization"]}
+  rows={[
+    ["Method", "Rule-based suffix stripping", "Dictionary + morphology + POS"],
+    ["Speed", "Very fast", "Slower"],
+    ["Output", "May be a non-word (<code>studi</code>)", "Always a valid word (<code>study</code>)"],
+    ["Accuracy", "Lower (crude)", "Higher"],
+    ["Example: 'studies'", "<code>studi</code>", "<code>study</code>"],
+    ["Example: 'better'", "<code>better</code>", "<code>good</code>"],
+    ["Best when", "Speed matters, exact form does not", "Quality matters, downstream reads words"],
+  ]}
+  caption="Stemming is fast and crude; lemmatization is slower and accurate."
+/>
+
+As a rule of thumb: reach for **lemmatization** when output quality matters and a dictionary is available, and **stemming** only when you need raw speed and do not care that the stems are not real words. In the neural era, both are used far less, because subword tokenization and learned embeddings already let models relate "run" and "running" without explicitly collapsing them.
+
+## A complete production pipeline
+
+In practice you assemble these steps into a single function, applied consistently to both training and inference text. A typical order is: strip HTML, lowercase (if appropriate), replace URLs and special tokens, tokenize, remove stopwords (if appropriate), and lemmatize (if appropriate). The exact recipe is dictated by the task. The cardinal rule is **consistency**: whatever you do to training text you must do identically to the text you predict on, or the model will see a distribution it never trained on. A common production pattern is to wrap the whole pipeline in a single, version-controlled function and call the exact same function at training time and at serving time, so the two can never drift apart.
+
+## Order of operations matters
+
+The *sequence* of preprocessing steps is not arbitrary; getting it wrong silently corrupts results. Strip HTML before tokenizing, or your tokens will be polluted with tag fragments. Expand contractions before removing stopwords, or "not" stays trapped inside "don't" and survives the filter. Lowercase before building a stopword set comparison, since stopword lists are lowercase. Lemmatize after tokenizing and (ideally) after POS tagging, because the lemmatizer needs individual words and benefits from their grammatical category. A good mental rule is to move from coarse, structural cleaning (encoding, HTML, URLs) toward fine, linguistic normalization (stopwords, lemmatization) — never the reverse. Because the steps interact, the only safe way to trust a pipeline is to print the intermediate output after each stage and confirm it looks the way you expect on a few real examples.
+
+## When NOT to preprocess
+
+Here is the twist that trips up people coming from older tutorials: with modern Transformer models, aggressive preprocessing is usually *counterproductive*. These models are trained on raw or lightly-cleaned text with their own subword tokenizers, and they rely on case, punctuation, and stopwords as genuine signal. Lowercasing, stripping punctuation, and removing stopwords before feeding text to BERT or GPT throws away information the model was specifically trained to use, and almost always lowers accuracy. Heavy preprocessing belongs to the world of count-based features (Bag-of-Words, TF-IDF); in the neural world, the tokenizer *is* the preprocessing, and your job is mostly to fix encoding issues and strip obvious junk like HTML.
+
+<Callout type="danger" title="Don't over-clean for neural models">
+A frequent mistake is applying a classic lowercase + stopword + stemming pipeline before a Transformer. This destroys signal the model expects. For LLMs and BERT-family models, do minimal cleaning and let the model's own tokenizer handle the rest.
+</Callout>
+
+## Contractions, spelling, and Unicode
+
+A few quieter preprocessing concerns cause an outsized number of bugs, so they deserve explicit attention.
+
+**Contractions** expand forms like "don't" to "do not" and "we're" to "we are." This matters because tokenizers split contractions inconsistently — some produce "do" + "n't", others "don" + "'t" — and expanding them first gives downstream steps a clean, predictable input. It also helps stopword removal find "not", which would otherwise hide inside "don't."
+
+**Spelling correction** maps misspellings to their intended words ("teh" to "the"). It can rescue signal in noisy user-generated text, but it is risky: aggressive correction mangles names, slang, and domain terms ("numpy" is not a typo of "lumpy"). Apply it only when your data is genuinely noisy and you have measured that it helps.
+
+**Unicode normalization** is the least glamorous and most important. The same visible character can be encoded multiple ways — an accented "é" can be a single code point or an "e" plus a combining accent — and the two will compare as different strings. Normalizing to a canonical form (NFC or NFKC) unifies them. Smart quotes, non-breaking spaces, and zero-width characters are perennial sources of "two identical-looking strings that are not equal" bugs. Normalizing encoding early saves hours of confusion later.
+
+## Measuring the impact of preprocessing
+
+Because every preprocessing choice is a trade-off, you should treat the pipeline itself as something to tune, not assume. The disciplined approach is to make preprocessing a set of switches — lowercase on/off, stopwords on/off, stemming versus lemmatization versus neither — and run an ablation: train your model under each configuration and compare the metric you actually care about on a held-out set.
+
+The results are often surprising. A pipeline that "feels" thorough can underperform a lighter one, especially as you move from simple linear models toward richer representations. The general pattern across the field is that the more powerful your downstream model, the *less* preprocessing helps, because a strong model can extract signal from raw text on its own. Count-based models (next topic) lean heavily on good preprocessing; deep neural models lean on it barely at all. Letting data, not folklore, decide the recipe is the mark of an experienced practitioner — and it is exactly the empirical mindset that the statistical revolution brought to NLP.
+
+## Code Example
+
+The example builds a small, configurable preprocessing pipeline with NLTK and compares stemming against lemmatization on the same words, so you can see the quality difference directly.
+
+<CodeBlock lang="python" filename="preprocess.py" code={`# preprocess.py
+# pip install nltk
+import re
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer, WordNetLemmatizer
+
+nltk.download("stopwords", quiet=True)
+nltk.download("wordnet", quiet=True)
+
+STOP = set(stopwords.words("english"))
+stemmer = PorterStemmer()
+lemmatizer = WordNetLemmatizer()
+
+def preprocess(text, *, lower=True, drop_stop=True, mode="lemma"):
+    if lower:
+        text = text.lower()
+    text = re.sub(r"http\\S+", "<url>", text)   # normalize URLs
+    text = re.sub(r"<[^>]+>", " ", text)        # strip HTML tags
+    tokens = re.findall(r"[a-z]+|<url>", text)
+    if drop_stop:
+        tokens = [t for t in tokens if t not in STOP]
+    if mode == "stem":
+        tokens = [stemmer.stem(t) for t in tokens]
+    elif mode == "lemma":
+        tokens = [lemmatizer.lemmatize(t) for t in tokens]
+    return tokens
+
+raw = "The studies on running and better algorithms were AMAZING! See http://x.io"
+print("lemma:", preprocess(raw, mode="lemma"))
+print("stem :", preprocess(raw, mode="stem"))
+
+# Compare stemming vs lemmatization directly
+print("\\nword        stem        lemma")
+for w in ["studies", "running", "better", "argument", "feet"]:
+    print(f"{w:<11} {stemmer.stem(w):<11} {lemmatizer.lemmatize(w)}")
+
+# Expected:
+# lemma: ['study', 'running', 'better', 'algorithm', 'amazing', '<url>']
+# stem : ['studi', 'run', 'better', 'algorithm', 'amaz', '<url>']
+#
+# word        stem        lemma
+# studies     studi       study
+# running     run         running
+# better      better      better
+# argument    argument    argument
+# feet        feet        foot
+`} />
+
+The comparison is revealing. The stemmer produces "studi" and "amaz" — fast but not real words — while the lemmatizer keeps "study" and (without POS hints) leaves "running" and "better" alone. Notice that lemmatization without a part-of-speech tag is conservative; supplying the POS (`lemmatizer.lemmatize("running", pos="v")` → "run") makes it far more aggressive. This is exactly why lemmatization pairs naturally with the POS tagging you learned in Topic 2.
+
+<KeyTakeaways phase={1}>
+- **Preprocessing collapses needless variation** so signal concentrates — but every step destroys information, so each is a trade-off, not a ritual.
+- **Lowercasing** helps when case is noise (search, topic classification) and hurts when case is signal (NER).
+- **Stopword removal** helps keyword/IR tasks but harms sentiment and most neural models, where "not" and other function words matter.
+- **Stemming** is fast, rule-based, and crude (may output non-words); **lemmatization** is slower, dictionary-based, and accurate.
+- **Apply preprocessing consistently** to training and inference text, or you create a train/serve mismatch.
+- For **modern Transformer models, do minimal cleaning** — the subword tokenizer is the preprocessing, and heavy cleaning destroys useful signal.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Why can stopword removal hurt sentiment analysis?",
+    options: ["It makes text longer", "It can delete meaning-flipping words like 'not'", "It introduces spelling errors", "It is too slow to run"],
+    correctIndex: 1,
+    explanation: "'not good' and 'good' differ only by the stopword 'not'. Removing it flips the sentiment, so stopword removal is dangerous for tasks where function words carry meaning."
+  },
+  {
+    question: "Which statement about stemming vs lemmatization is correct?",
+    options: ["Stemming always produces valid dictionary words", "Lemmatization is rule-based suffix stripping", "Stemming is faster but may produce non-words; lemmatization is slower but accurate", "They are identical"],
+    correctIndex: 2,
+    explanation: "Stemming crudely strips suffixes (fast, may yield 'studi'); lemmatization uses a dictionary and morphology to return a real base form like 'study' (slower, accurate)."
+  },
+  {
+    question: "For a modern Transformer model like BERT, you should generally:",
+    options: ["Lowercase, strip punctuation, and remove stopwords aggressively", "Do minimal cleaning and rely on the model's subword tokenizer", "Stem every word first", "Remove all rare words"],
+    correctIndex: 1,
+    explanation: "Transformers are trained on lightly-cleaned text and use case, punctuation, and stopwords as signal. Aggressive classic preprocessing throws away information the model expects."
+  }
+]} />
+
+## What's Next
+
+Your text is now clean and consistently tokenized. The natural next question is: how do we turn these tokens into *numbers* a model can compute with? In **Bag of Words & TF-IDF** you will build the classic count-based representations — your first real bridge from words to vectors — and meet the mathematics of term weighting and document similarity.

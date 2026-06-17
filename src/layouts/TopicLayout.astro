@@ -1,0 +1,221 @@
+---
+/**
+ * TopicLayout (PRD §10.2 / Step 5.1) — three-column layout for the 48 topic
+ * pages: left Sidebar (240px), centered article (max 780px), right TOC (220px).
+ * Adds the ScrollProgress bar (doubles as the phase-colored top border),
+ * a mark-as-complete control, prev/next nav, and a back-to-top button.
+ * Collapses to a single column with a slide-in sidebar drawer on small screens.
+ */
+import BaseLayout from './BaseLayout.astro';
+import Sidebar from '../components/layout/Sidebar.astro';
+import TableOfContents from '../components/layout/TableOfContents.astro';
+import TopicNav from '../components/layout/TopicNav.astro';
+import ScrollProgress from '../components/ui/ScrollProgress.tsx';
+import BackToTop from '../components/ui/BackToTop.astro';
+import {
+  getPrevNextTopics,
+  getPhaseColor,
+  getPhaseCssVar,
+  type Topic,
+} from '../data/curriculum';
+
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+interface Props {
+  topic: Topic;
+  headings?: Heading[];
+}
+const { topic, headings = [] } = Astro.props;
+
+const { prev, next } = getPrevNextTopics(topic.slug);
+const phaseColor = getPhaseColor(topic.phase);
+const accentVar = getPhaseCssVar(topic.phase);
+---
+
+<BaseLayout
+  title={topic.title}
+  description={topic.subtitle}
+  accent={accentVar}
+  hideFooter
+>
+  <ScrollProgress client:load phaseColor={phaseColor} />
+
+  <button id="drawer-toggle" class="drawer-toggle" aria-label="Open topic navigation" aria-expanded="false">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    <span>Topics</span>
+  </button>
+
+  <div class="topic-grid">
+    <div class="sidebar-col" id="sidebar-col">
+      <Sidebar activeSlug={topic.slug} />
+    </div>
+    <div class="sidebar-backdrop" id="sidebar-backdrop" hidden></div>
+
+    <article class="topic-main" data-pagefind-body>
+      <slot />
+
+      <div class="mark-complete-wrap" data-pagefind-ignore>
+        <button id="mark-complete" type="button" data-slug={topic.slug}>
+          <svg class="mc-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <span class="mc-label">Mark as complete</span>
+        </button>
+      </div>
+
+      <div data-pagefind-ignore>
+        <TopicNav prev={prev} next={next} />
+      </div>
+    </article>
+
+    <div class="toc-col">
+      <TableOfContents headings={headings} readingTime={topic.readingTime} />
+    </div>
+  </div>
+
+  <BackToTop />
+</BaseLayout>
+
+<style>
+  .topic-grid {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr) 220px;
+    max-width: 1440px;
+    margin: 0 auto;
+    align-items: start;
+  }
+
+  .topic-main {
+    min-width: 0;
+    max-width: 780px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 2.5rem 2rem 4rem;
+  }
+
+  .mark-complete-wrap {
+    margin-top: 2.5rem;
+  }
+  #mark-complete {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 1.1rem;
+    border-radius: 9999px;
+    border: 1.5px solid var(--accent, var(--phase-1));
+    background: transparent;
+    color: var(--accent, var(--phase-1));
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 150ms ease, color 150ms ease;
+  }
+  #mark-complete:hover {
+    background: color-mix(in srgb, var(--accent, var(--phase-1)) 12%, transparent);
+  }
+  #mark-complete.is-complete {
+    background: var(--accent, var(--phase-1));
+    color: #fff;
+  }
+
+  /* Mobile drawer toggle (hidden on desktop) */
+  .drawer-toggle {
+    display: none;
+    align-items: center;
+    gap: 0.4rem;
+    position: sticky;
+    top: 60px;
+    z-index: 30;
+    margin: 0;
+    padding: 0.5rem 0.9rem;
+    width: 100%;
+    border: none;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .sidebar-backdrop { display: none; }
+
+  /* Hide right TOC on narrower desktops/tablets */
+  @media (max-width: 1200px) {
+    .topic-grid { grid-template-columns: 240px minmax(0, 1fr); }
+    .toc-col { display: none; }
+  }
+
+  /* Tablet & mobile: sidebar becomes an off-canvas drawer */
+  @media (max-width: 1024px) {
+    .topic-grid { grid-template-columns: minmax(0, 1fr); }
+    .drawer-toggle { display: flex; }
+    .sidebar-col {
+      position: fixed;
+      top: 60px;
+      left: 0;
+      width: 280px;
+      max-width: 85vw;
+      height: calc(100vh - 60px);
+      z-index: 90;
+      transform: translateX(-100%);
+      transition: transform 220ms ease;
+      box-shadow: 0 0 40px rgba(0, 0, 0, 0.25);
+    }
+    .topic-grid.drawer-open .sidebar-col { transform: translateX(0); }
+    .topic-grid.drawer-open .sidebar-backdrop {
+      display: block;
+      position: fixed;
+      inset: 60px 0 0 0;
+      z-index: 80;
+      background: rgba(0, 0, 0, 0.4);
+    }
+  }
+
+  @media (max-width: 640px) {
+    .topic-main { padding: 1.75rem 1.1rem 3rem; }
+  }
+</style>
+
+<script>
+  import { setLastVisited, isTopicComplete, toggleTopicComplete } from '../scripts/progress';
+
+  // ---- Mobile sidebar drawer ----
+  const grid = document.querySelector('.topic-grid');
+  const toggle = document.getElementById('drawer-toggle');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  function closeDrawer() {
+    grid?.classList.remove('drawer-open');
+    toggle?.setAttribute('aria-expanded', 'false');
+  }
+  toggle?.addEventListener('click', () => {
+    const open = grid?.classList.toggle('drawer-open');
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  backdrop?.addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDrawer();
+  });
+
+  // ---- Progress tracking (F1) — uses src/scripts/progress.ts ----
+  const btn = document.getElementById('mark-complete') as HTMLButtonElement | null;
+  const slug = btn?.dataset.slug;
+
+  if (slug) setLastVisited(slug);   // homepage "Resume Reading"
+
+  function renderButton() {
+    if (!btn || !slug) return;
+    const done = isTopicComplete(slug);
+    btn.classList.toggle('is-complete', done);
+    const label = btn.querySelector('.mc-label');
+    if (label) label.textContent = done ? 'Completed' : 'Mark as complete';
+  }
+
+  btn?.addEventListener('click', () => {
+    if (!slug) return;
+    toggleTopicComplete(slug);   // updates storage + dispatches nlp2agents:progress
+    renderButton();
+  });
+
+  renderButton();
+</script>

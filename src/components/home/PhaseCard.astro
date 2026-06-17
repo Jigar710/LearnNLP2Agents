@@ -1,0 +1,60 @@
+---
+/** PhaseCard (PRD §5, home) — phase overview card on the landing page. */
+import type { Phase } from '../../data/curriculum';
+import { getTopicsByPhase } from '../../data/curriculum';
+import { withBase } from '../../utils/base';
+
+interface Props { phase: Phase; }
+const { phase } = Astro.props;
+const first = getTopicsByPhase(phase.id)[0];
+---
+<a class="phase-card" href={withBase(`/phase/${phase.id}`)} style={`--accent: ${phase.color}`}>
+  <div class="phase-card-top">
+    <span class="phase-card-num">Phase {phase.id}</span>
+    <span class="phase-card-count">{phase.topicCount} topics</span>
+  </div>
+  <h3 class="phase-card-title">{phase.title}</h3>
+  <p class="phase-card-sub">{phase.subtitle}</p>
+  <ul class="phase-card-skills">
+    {phase.skills.slice(0, 3).map((s) => <li>{s}</li>)}
+  </ul>
+  <span class="phase-card-cta">Start Phase →</span>
+</a>
+
+<style>
+  .phase-card {
+    display: flex;
+    flex-direction: column;
+    padding: 1.4rem;
+    border: 1px solid var(--border-color);
+    border-top: 3px solid var(--accent);
+    border-radius: 12px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+  }
+  .phase-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.10);
+    color: var(--text-primary);
+  }
+  .phase-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; }
+  .phase-card-num {
+    font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
+    padding: 2px 9px; border-radius: 9999px;
+  }
+  .phase-card-count { font-size: 0.75rem; color: var(--text-muted); }
+  .phase-card-title { font-size: 1.15rem; font-weight: 600; margin: 0 0 0.3rem; }
+  .phase-card-sub { font-size: 0.85rem; color: var(--text-secondary); margin: 0 0 0.8rem; line-height: 1.5; }
+  .phase-card-skills { list-style: none; margin: 0 0 1rem; padding: 0; flex: 1; }
+  .phase-card-skills li {
+    position: relative; padding-left: 1.1rem; font-size: 0.8rem; color: var(--text-secondary);
+    margin: 0.3rem 0; line-height: 1.45;
+  }
+  .phase-card-skills li::before {
+    content: ''; position: absolute; left: 0; top: 0.55em; width: 6px; height: 6px;
+    border-radius: 9999px; background: var(--accent);
+  }
+  .phase-card-cta { font-size: 0.82rem; font-weight: 600; color: var(--accent); }
+</style>

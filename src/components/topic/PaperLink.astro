@@ -1,0 +1,75 @@
+---
+/**
+ * PaperLink (PRD §11.7 / Step 6.8) — link card for an original research paper.
+ */
+interface Props {
+  title: string;
+  authors: string;
+  year: number | string;
+  venue?: string;
+  url: string;
+}
+const { title, authors, year, venue, url } = Astro.props;
+const meta = [authors, String(year), venue].filter(Boolean).join(' · ');
+---
+
+<a class="paper-link" href={url} target="_blank" rel="noopener noreferrer">
+  <span class="paper-icon" aria-hidden="true">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8M16 17H8M10 9H8"/></svg>
+  </span>
+  <span class="paper-body">
+    <span class="paper-title">{title}</span>
+    <span class="paper-meta">{meta}</span>
+  </span>
+  <span class="paper-cta">Read Paper →</span>
+</a>
+
+<style>
+  .paper-link {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    margin: 1rem 0;
+    padding: 0.9rem 1.1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    transition: background 150ms ease, border-color 150ms ease;
+  }
+  .paper-link:hover {
+    background: var(--code-bg-inline);
+    border-color: var(--link-color);
+    color: var(--text-primary);
+  }
+  .paper-icon {
+    flex-shrink: 0;
+    color: var(--link-color);
+  }
+  .paper-body {
+    flex: 1;
+    min-width: 0;
+  }
+  .paper-title {
+    display: block;
+    font-weight: 600;
+    font-size: 0.92rem;
+    line-height: 1.35;
+  }
+  .paper-meta {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+  .paper-cta {
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--link-color);
+    white-space: nowrap;
+  }
+  @media (max-width: 520px) {
+    .paper-cta { display: none; }
+  }
+</style>

@@ -1,0 +1,195 @@
+---
+title: "Word Embeddings — Word2Vec (CBOW & Skip-gram)"
+subtitle: "Words as dense vectors — capturing meaning in space"
+phase: 1
+topicNumber: 6
+slug: "word2vec"
+readingTime: 16
+prerequisites: ["bag-of-words-tfidf"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: true
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+import DiagramWrapper from '../../components/topic/DiagramWrapper.astro';
+import Word2VecSpace from '../../components/diagrams/Word2VecSpace.tsx';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('word2vec');
+
+<TopicHero topic={topic} />
+
+Bag-of-Words and TF-IDF turned words into numbers, but those numbers had no sense of *meaning* — "cat" and "cats" were as unrelated as "cat" and "banana." **Word2Vec** changed that. It learns a dense vector for every word such that words used in similar contexts land near each other in space, so that geometry finally reflects semantics. The famous result `king − man + woman ≈ queen` showed that these vectors capture not just similarity but *relationships*. Word embeddings were the conceptual leap that set the stage for everything that followed, from contextual models like BERT to the embeddings that power modern retrieval. This topic builds Word2Vec from the ground up.
+
+We will see why count-based methods cannot capture meaning, what the distributional hypothesis is, how Word2Vec's two architectures (CBOW and Skip-gram) learn embeddings from raw text, the training trick (negative sampling) that makes it efficient, and the vector arithmetic that made it famous. An interactive 2D map lets you explore an embedding space, and the code trains real embeddings with gensim.
+
+## The limitations of Bag-of-Words
+
+Recall from Topic 5 the deep flaw of count-based representations: every word is an independent dimension, so the vectors for "car" and "automobile" are orthogonal — completely unrelated — even though they mean nearly the same thing. BoW and TF-IDF have **no notion of semantic similarity**. They also produce huge, sparse vectors (one dimension per vocabulary word, mostly zeros). What we want instead is a *dense, low-dimensional* vector for each word in which similar words are close together. That is exactly what a word embedding is.
+
+## What are word embeddings?
+
+A **word embedding** is a dense vector — typically 100 to 300 dimensions — that represents a word, learned so that words with similar meanings have similar vectors. Unlike the sparse, tens-of-thousands-dimensional BoW vectors, embeddings are compact and *distributed*: meaning is spread across all dimensions rather than confined to one. In a good embedding space, "cat" and "dog" are near each other (both pets), "Paris" and "London" are near each other (both capitals), and the *direction* from "man" to "woman" is roughly the same as from "king" to "queen" (a gender relationship). Geometry encodes meaning, and that single principle reverberates through the rest of the field.
+
+## The distributional hypothesis
+
+How can meaning be learned from raw text with no labels? The answer is the **distributional hypothesis**: *"a word is characterized by the company it keeps"* (Firth, 1957). Words that appear in similar contexts tend to have similar meanings — if "cat" and "dog" both frequently appear near "pet," "fur," "vet," and "feed," they probably mean similar things. Word2Vec operationalizes this: it learns embeddings by predicting a word from its context (or vice versa), so words that share contexts end up with similar vectors. The supervision is free — it comes from the structure of language itself, the same self-supervision idea that later scales to LLMs.
+
+## Word2Vec: the neural approach
+
+Word2Vec (Mikolov et al. 2013) learns embeddings with a shallow, two-layer neural network. The key idea: train a network on a *fake* prediction task — predict a word from its neighbours, or its neighbours from the word — but throw away the predictions and keep the learned *weights*, which are the embeddings. The task is a means to an end; the embeddings are the prize. There are two architectures, differing in what predicts what.
+
+## CBOW: predict the center from context
+
+**Continuous Bag of Words (CBOW)** predicts a center word from its surrounding context words. Given the context "the ___ sat on," predict "cat." The context word vectors are averaged and used to predict the center word. CBOW is fast and works well for frequent words, since it effectively smooths over context.
+
+## Skip-gram: predict context from the center
+
+**Skip-gram** does the reverse: given a center word, predict its surrounding context words. Given "cat," predict "the," "sat," "on." Skip-gram treats each (center, context) pair as a training example, which means it generates more training signal per sentence and represents *rare* words better than CBOW. Skip-gram (with negative sampling) is the more popular choice for high-quality embeddings.
+
+<Callout type="tip">
+CBOW vs Skip-gram, simply: CBOW predicts a word from its context (fast, good for frequent words); Skip-gram predicts context from a word (slower, better for rare words and overall quality). When in doubt, Skip-gram with negative sampling is the standard high-quality default.
+</Callout>
+
+## The Mathematics
+
+The naive Skip-gram objective uses a softmax over the entire vocabulary to model the probability of a context word `w_O` given the input word `w_I`, with `v` the input embedding and `v'` the output embedding:
+
+<MathBlock
+  formula="P(w_O \mid w_I) = \frac{\exp\!\left(v'_{w_O} \cdot v_{w_I}\right)}{\sum_{w=1}^{V} \exp\!\left(v'_{w} \cdot v_{w_I}\right)}"
+  caption="Skip-gram softmax: probability of a context word, normalized over the whole vocabulary V."
+/>
+
+That denominator sums over every word in the vocabulary at every step — far too expensive for large vocabularies. **Negative sampling** fixes this by reframing the task: instead of predicting a full distribution, distinguish the true context word from a few `k` random "negative" words. The objective maximizes the score for true (word, context) pairs and minimizes it for sampled negatives:
+
+<MathBlock
+  formula="\log \sigma\!\left(v'_{w_O} \cdot v_{w_I}\right) + \sum_{i=1}^{k} \mathbb{E}_{w_i \sim P_n}\left[\log \sigma\!\left(-v'_{w_i} \cdot v_{w_I}\right)\right]"
+  caption="Negative sampling: push true pairs together, push k random negative pairs apart (σ is the logistic function)."
+/>
+
+This turns an expensive `V`-way classification into a cheap handful of binary classifications, making training fast at scale. The vector-arithmetic property emerges naturally: relationships become consistent directions, so an analogy "a is to b as c is to ?" is solved by finding the word whose vector is closest to:
+
+<MathBlock
+  formula="v_{\text{queen}} \approx v_{\text{king}} - v_{\text{man}} + v_{\text{woman}}"
+  caption="Word vector arithmetic: relationships are directions, so analogies become vector addition."
+/>
+
+## Word vector arithmetic and evaluation
+
+The arithmetic property is striking: subtract "man" from "king" to get a "royalty without gender" direction, add "woman," and you land near "queen." This works for many relations — country-capital, singular-plural, verb tense — because the embedding space organizes relationships as consistent directions. Embeddings are **evaluated** on such *analogy tasks* (does `king − man + woman` retrieve `queen`?) and on *word-similarity benchmarks* (do human-judged similar words have high cosine similarity?). These intrinsic evaluations measure how well the geometry captures meaning.
+
+## Visualizing the embedding space
+
+High-dimensional embeddings can be projected to 2D (with t-SNE or PCA) to visualize how words cluster by meaning. Explore the interactive map below: words group into categories (animals, countries, professions, food), and clicking a word reveals its nearest neighbours — the geometry of meaning made visible.
+
+<DiagramWrapper title="A 2D word embedding space" caption="Click any word to see its nearest neighbours; words cluster by meaning. Search to highlight a word.">
+  <Word2VecSpace client:visible />
+</DiagramWrapper>
+
+## Window size, dimensions, and other choices
+
+Training good embeddings involves a few hyperparameters worth understanding, because they shape what the vectors capture. The **window size** — how many words on each side count as context — controls the *kind* of similarity learned. Small windows (1-2 words) capture *syntactic* similarity, grouping words that play the same grammatical role; larger windows (5-10 words) capture *topical* similarity, grouping words about the same subject. The **vector size** (dimensionality) trades expressiveness against cost: 100-300 dimensions is typical, with more dimensions capturing finer distinctions but needing more data and compute. The number of **negative samples** (around 5-20 for small datasets, fewer for large ones) and the number of **epochs** round out the main knobs.
+
+There is also a subtle but important detail: **subsampling of frequent words**. Words like "the" and "of" are so common that they provide little useful signal and dominate training, so Word2Vec randomly discards some of their occurrences, which both speeds training and improves the quality of the rare-word embeddings — an echo of the stopword and Zipf's-law concerns from earlier topics. None of these settings have universally optimal values; they depend on your corpus size, domain, and what you need the embeddings for. The practical guidance is the same as everywhere in this curriculum: start with sensible defaults (Skip-gram, window 5, 100-300 dimensions, 5 negatives), and tune against an evaluation that reflects your actual downstream use, whether that is analogy accuracy, word-similarity correlation, or performance on a real task that consumes the embeddings.
+
+## The key limitation: one vector per word
+
+Word2Vec has a fundamental limitation that motivates much of what follows in this curriculum: it learns **exactly one vector per word**, regardless of context. The word "bank" gets a single embedding that must somehow average its river-edge and financial senses, even though those meanings are unrelated. The word "apple" cannot distinguish the fruit from the company. These *static* embeddings cannot represent that a word's meaning shifts with its surroundings — they are a fixed lookup table, computed once and frozen.
+
+This is precisely the gap that **contextual** embeddings, and ultimately the Transformer, were built to close. A model like BERT produces a *different* vector for "bank" in "river bank" versus "savings bank," because its representation depends on the whole sentence (Topic 19). Word2Vec's static embeddings were a monumental step — they proved that meaning could be learned as geometry from raw text — but they are a stepping stone, not the destination. Understanding both their power and this limitation frames the entire arc ahead: the field spent the years after Word2Vec learning to make embeddings *contextual*, which is what attention and Transformers ultimately achieve. The dense-vector idea you have learned here never disappears; it gets refined from a fixed table into a dynamic, context-sensitive function, and that refinement is one of the central stories of Phase 2.
+
+## Code Example
+
+The code trains Word2Vec on a small corpus with gensim, finds similar words, performs the famous vector arithmetic, and shows how to access the learned vectors.
+
+<CodeBlock lang="python" filename="word2vec_demo.py" code={`# word2vec_demo.py
+# pip install gensim
+from gensim.models import Word2Vec
+from gensim.utils import simple_preprocess
+
+# A tiny corpus (in practice: millions of sentences)
+sentences_raw = [
+    "the king ruled the kingdom with his queen",
+    "the man and the woman walked together",
+    "a king is a male ruler and a queen is a female ruler",
+    "the dog and the cat are common pets",
+    "paris is the capital of france and london of england",
+]
+sentences = [simple_preprocess(s) for s in sentences_raw]
+
+# Train Skip-gram with negative sampling
+model = Word2Vec(
+    sentences, vector_size=50, window=5, min_count=1,
+    sg=1,            # 1 = Skip-gram (0 = CBOW)
+    negative=5,      # negative sampling with 5 negatives
+    epochs=200,      # many epochs since the corpus is tiny
+)
+
+# Access a word's learned vector
+print("vector for 'king' (first 5 dims):", model.wv["king"][:5].round(3))
+
+# Find most similar words
+print("\\nmost similar to 'king':", model.wv.most_similar("king", topn=3))
+
+# Vector arithmetic: king - man + woman ~= queen
+result = model.wv.most_similar(positive=["king", "woman"],
+                               negative=["man"], topn=1)
+print("\\nking - man + woman =", result)
+
+# Expected (a tiny corpus gives rough results; real corpora are crisp):
+# vector for 'king' (first 5 dims): [ 0.01 -0.03  0.02 ... ]
+# most similar to 'king': [('queen', 0.41), ('ruler', 0.33), ...]
+# king - man + woman = [('queen', 0.38)]
+`} />
+
+On a real corpus of millions of sentences these results are crisp; on our toy corpus they are rough but illustrate the mechanics — `most_similar` finds words with nearby vectors, and the `positive`/`negative` arithmetic implements `king − man + woman`. The `sg=1` and `negative=5` flags select Skip-gram with negative sampling, the standard high-quality recipe. These dense, meaning-bearing vectors are a foundational tool, and the next topic refines them further with GloVe and FastText. Beyond words, the very same idea — represent items as dense vectors whose geometry encodes similarity — generalizes to sentences, documents, images, and the embeddings that power the retrieval systems of Phase 4, making this one of the most far-reaching ideas in the whole curriculum.
+
+<PaperLink
+  title="Efficient Estimation of Word Representations in Vector Space (Word2Vec)"
+  authors="Mikolov, Chen, Corrado, Dean"
+  year={2013}
+  venue="ICLR Workshop"
+  url="https://arxiv.org/abs/1301.3781"
+/>
+
+<KeyTakeaways phase={1}>
+- **Word embeddings** are dense, low-dimensional vectors where similar words land near each other — fixing BoW/TF-IDF's lack of semantic similarity.
+- They rest on the **distributional hypothesis**: words in similar contexts have similar meanings, so embeddings can be learned self-supervised from raw text.
+- **Word2Vec** trains a shallow network on a fake prediction task and keeps the learned weights: **CBOW** predicts a word from context (fast, frequent words); **Skip-gram** predicts context from a word (better for rare words and quality).
+- The naive softmax over the whole vocabulary is too expensive; **negative sampling** reframes it as distinguishing true pairs from a few random negatives, making training fast.
+- Relationships become **consistent directions**, so analogies work as vector arithmetic: `king − man + woman ≈ queen`.
+- Embeddings are evaluated on **analogy and word-similarity** tasks; they are the foundation for contextual models and modern retrieval.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What is the distributional hypothesis that Word2Vec relies on?",
+    options: ["Words are uniformly distributed", "A word is characterized by the company it keeps — words in similar contexts have similar meanings", "Every word needs a label", "Rare words have no meaning"],
+    correctIndex: 1,
+    explanation: "The distributional hypothesis says words appearing in similar contexts tend to mean similar things. Word2Vec learns embeddings by predicting words from contexts, so context-sharing words get similar vectors."
+  },
+  {
+    question: "Why is negative sampling used instead of the full softmax?",
+    options: ["It increases accuracy on rare words only", "The softmax sums over the entire vocabulary at every step (too expensive); negative sampling instead distinguishes the true pair from a few random negatives", "It removes the need for context", "It makes vectors sparse"],
+    correctIndex: 1,
+    explanation: "The full softmax normalizes over all V words per step, which is prohibitively slow. Negative sampling turns it into a cheap handful of binary classifications (true pair vs k random negatives), making training fast at scale."
+  },
+  {
+    question: "What does the result 'king − man + woman ≈ queen' demonstrate?",
+    options: ["A coincidence", "That embeddings encode relationships as consistent directions, so analogies can be solved with vector arithmetic", "That the model is overfitting", "That words have no relationships"],
+    correctIndex: 1,
+    explanation: "The embedding space organizes relationships (like gender) as consistent vector directions, so subtracting and adding word vectors moves along those relationships — letting analogies be solved by addition."
+  }
+]} />
+
+## What's Next
+
+Word2Vec learns from local context windows. Two influential alternatives take different routes: GloVe uses global co-occurrence statistics, and FastText represents words by their sub-pieces to handle rare and unseen words. In **Word Embeddings — GloVe & FastText**, we study both and when to choose each.

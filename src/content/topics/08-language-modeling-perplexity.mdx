@@ -1,0 +1,179 @@
+---
+title: "Language Modeling & Perplexity"
+subtitle: "Teaching a machine the probability of language"
+phase: 1
+topicNumber: 8
+slug: "language-modeling-perplexity"
+readingTime: 15
+prerequisites: ["corpus-tokens-vocabulary"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+
+export const topic = getTopicBySlug('language-modeling-perplexity');
+
+<TopicHero topic={topic} />
+
+What is the probability of the sentence "the cat sat on the mat" versus "mat the on sat cat the"? A **language model** answers exactly this: it assigns a probability to sequences of words, capturing which sequences are likely and which are not. This deceptively simple idea — *model the probability of language* — is the foundation of everything from autocomplete to GPT. Every large language model, no matter how enormous, is at heart a language model: a system that predicts the probability of the next word. This topic builds language modeling from its classical roots (n-gram models) and introduces **perplexity**, the metric that measures how well a model predicts language and that you will see referenced throughout the rest of the curriculum.
+
+We will define what a language model is, build n-gram models with the Markov assumption, confront the sparsity problem and its smoothing fixes, and derive perplexity and its elegant "branching factor" intuition. The code builds a bigram model from scratch and computes perplexity, making the abstract concrete.
+
+## What is a language model?
+
+A **language model** assigns a probability to a sequence of words — `P(w_1, w_2, ..., w_n)`. A good model gives high probability to fluent, plausible sentences and low probability to nonsense. Equivalently, and more usefully, it predicts the **next word** given the previous ones: `P(w_n | w_1, ..., w_{n-1})`. These two views are the same by the chain rule of probability, and the next-word-prediction view is exactly what powers autocomplete, and — scaled up massively — GPT. A language model is the formal object underlying all of generative NLP.
+
+## N-gram language models
+
+The classical approach is the **n-gram model**, which estimates word probabilities from counts in a corpus. A **unigram** model assumes each word is independent (just word frequencies). A **bigram** model conditions each word on the *one* previous word: `P(w_i | w_{i-1})`. A **trigram** model conditions on the previous *two*. You estimate these probabilities by counting: `P(sat | cat)` is the number of times "cat sat" appears divided by the number of times "cat" appears. N-gram models are simple, fast, and were the workhorse of NLP for decades, powering early speech recognition, spelling correction, and machine translation.
+
+## The Markov assumption
+
+A full language model would condition each word on *all* previous words, but that requires impossibly many probabilities to estimate. N-gram models make the **Markov assumption**: a word depends only on the previous `n−1` words, not the entire history. A bigram model assumes `P(w_i | w_1, ..., w_{i-1}) ≈ P(w_i | w_{i-1})` — only the immediately preceding word matters. This is obviously a simplification (real language has long-range dependencies), but it makes estimation tractable, and short contexts capture a surprising amount of local fluency. The Markov assumption's limitation — a fixed, short context — is exactly what RNNs and ultimately Transformers were built to overcome.
+
+<Callout type="tip">
+The Markov assumption is a trade-off: longer n (more context) captures more but needs exponentially more data to estimate reliably, and most long n-grams are never seen. This tension — wanting long context but lacking data for it — drives the entire evolution from n-grams to neural language models.
+</Callout>
+
+## The sparsity problem and smoothing
+
+N-gram models have a fatal weakness: **sparsity**. Most possible n-grams never appear in any finite corpus, so their counts are zero, giving them zero probability — and a single zero makes the whole sentence's probability zero (since probabilities multiply). A sentence containing one unseen bigram is judged impossible, which is absurd. **Smoothing** fixes this by shifting a little probability mass from seen to unseen n-grams. The simplest, **Laplace (add-one) smoothing**, adds 1 to every count so nothing is zero. More sophisticated methods like **Kneser-Ney smoothing** distribute mass far more cleverly, using how many distinct contexts a word appears in, and were the state of the art for n-gram models. Smoothing is essential — without it, n-gram models are unusable on real text.
+
+## Perplexity: measuring a language model
+
+How good is a language model? The standard intrinsic metric is **perplexity**, which measures how well the model predicts a held-out test set. Lower is better. Perplexity is the exponential of the average negative log-probability the model assigns to the test text — equivalently, the inverse probability normalized by length. A model that assigns high probability to the actual test text (it is not "surprised" by real language) has low perplexity; a model that assigns low probability (it is surprised) has high perplexity.
+
+## Perplexity intuition: the branching factor
+
+The most intuitive reading of perplexity is as an **average branching factor**: how many words, on average, is the model effectively choosing among at each step? A perplexity of 100 means the model is about as uncertain as if it were picking uniformly among 100 words at each position. A perplexity of 1 would mean perfect prediction (it always knows the next word). Lower perplexity means the model has narrowed down the possibilities — it is less confused. This branching-factor view makes perplexity tangible: it is the model's average uncertainty, measured in "equivalent number of equally-likely choices."
+
+## The Mathematics
+
+By the chain rule, the probability of a sequence factorizes into a product of conditional probabilities, which the Markov assumption truncates to the previous `n−1` words:
+
+<MathBlock
+  formula="P(w_1, \ldots, w_n) = \prod_{i=1}^{n} P(w_i \mid w_1, \ldots, w_{i-1}) \approx \prod_{i=1}^{n} P(w_i \mid w_{i-n+1}, \ldots, w_{i-1})"
+  caption="Chain rule (left) and the n-gram Markov approximation (right): condition on a short window, not all history."
+/>
+
+Perplexity of a test sequence `W` of `N` words is the inverse probability normalized by length — the geometric mean of the per-word inverse probabilities:
+
+<MathBlock
+  formula="\text{PP}(W) = P(w_1, \ldots, w_N)^{-\frac{1}{N}} = \sqrt[N]{\prod_{i=1}^{N} \frac{1}{P(w_i \mid w_{<i})}}"
+  caption="Perplexity: the (length-normalized) inverse probability of the test text; lower is better."
+/>
+
+And Laplace (add-one) smoothing adjusts bigram probabilities so no count is zero, where `V` is the vocabulary size:
+
+<MathBlock
+  formula="P_{\text{Laplace}}(w_i \mid w_{i-1}) = \frac{\text{count}(w_{i-1}, w_i) + 1}{\text{count}(w_{i-1}) + V}"
+  caption="Add-one smoothing: add 1 to every bigram count and V to the denominator, so unseen bigrams get nonzero probability."
+/>
+
+## Neural language models and applications
+
+N-gram models gave way to **neural language models**, which replace counting with learned representations. Instead of a fixed short context and sparse counts, a neural LM uses word embeddings (Topic 6) and a network to predict the next word, generalizing far better to unseen contexts and capturing longer dependencies. RNNs (next topic), then Transformers, then GPT are all neural language models — and they are evaluated with the same perplexity metric you just learned. Language models, classical or neural, power **autocomplete, spelling/grammar correction, speech recognition** (choosing the most probable transcription), and **machine translation** (choosing fluent output). The objective — predict the next word — is the same one that, scaled to trillions of words, produces modern LLMs.
+
+## Generating text from a language model
+
+A language model does not just *score* text — it can *generate* it, and seeing how connects n-grams directly to GPT. Because the model gives a probability distribution over the next word given the context, you can *sample* from that distribution to pick a next word, append it to the context, and repeat. Start with a seed like "the cat" and a bigram model will sample a likely next word ("sat"), then condition on "sat" to sample the next, and so on, producing a sentence one word at a time. This is **autoregressive generation**, and it is exactly the mechanism GPT uses (Topic 20) — the only difference is that GPT's next-word distribution comes from a giant Transformer instead of a count table.
+
+The quality of generated text reveals the model's limitations vividly. A bigram model produces locally plausible but globally incoherent text, because each word depends only on the immediately preceding one — it has no memory of the topic or sentence structure beyond a single word. Trigram models do a little better; long n-grams would do better still but cannot be estimated from finite data. This is the n-gram dilemma made tangible: better generation needs longer context, but longer context needs exponentially more data. Watching a bigram model generate word salad that is locally grammatical but globally nonsensical is the clearest possible motivation for the sequence models of the next topic, which maintain a *learned* memory of arbitrary-length history rather than a fixed window of literal previous words. The generative objective is identical from bigrams to GPT; what changes is how much context the model can actually use.
+
+## Why n-grams gave way to neural models
+
+It is worth being precise about *why* the field abandoned n-gram models, because each reason points to a fix that neural models provide. First, **fixed short context**: the Markov assumption caps how far back the model can see, so it cannot capture that "the keys, which I left on the table this morning, *are* missing" requires agreement across many words. Neural models can, in principle, use arbitrarily long context. Second, **sparsity and no generalization**: n-gram models treat every word as an atom, so seeing "the black cat" teaches them nothing about "the dark cat," because "black" and "dark" are unrelated symbols to a count table. Neural models use embeddings (Topic 6), so similar words share statistical strength — learning about one helps with related ones. Third, **storage**: a high-order n-gram model must store counts for an astronomical number of n-grams, while a neural model compresses everything into a fixed set of weights.
+
+These three advantages — long context, generalization through embeddings, and compact parameterization — are exactly what neural language models deliver, and they explain the trajectory of the rest of this curriculum. The story from here is a steady relaxation of the n-gram model's constraints: RNNs (next topic) replace the fixed window with a learned hidden state that can in principle remember the whole sequence; LSTMs fix the RNN's difficulty with long dependencies; attention and Transformers let every position directly access every other; and scale turns the next-word objective into the general capabilities of modern LLMs. Yet through all of it, the core idea you learned here is unchanged — model the probability of the next word — and perplexity remains the metric. N-gram models are obsolete in practice, but as the first concrete instance of language modeling, they are the clearest window into what every model since, up to and including the largest LLMs, is fundamentally doing.
+
+## Code Example
+
+The code builds a bigram language model from scratch with add-one smoothing, computes the probability of a sentence, and calculates perplexity on test text.
+
+<CodeBlock lang="python" filename="bigram_lm.py" code={`# bigram_lm.py
+import math
+from collections import Counter, defaultdict
+
+corpus = [
+    "the cat sat on the mat",
+    "the dog sat on the log",
+    "the cat ran on the mat",
+    "a dog ran on the log",
+]
+tokens = [["<s>"] + s.split() + ["</s>"] for s in corpus]
+
+# Count unigrams and bigrams
+unigrams = Counter(w for s in tokens for w in s)
+bigrams = Counter((s[i], s[i+1]) for s in tokens for i in range(len(s)-1))
+V = len(unigrams)
+
+def bigram_prob(w_prev, w):
+    # Add-one (Laplace) smoothing
+    return (bigrams[(w_prev, w)] + 1) / (unigrams[w_prev] + V)
+
+def sentence_logprob(sentence):
+    s = ["<s>"] + sentence.split() + ["</s>"]
+    return sum(math.log(bigram_prob(s[i], s[i+1])) for i in range(len(s)-1))
+
+def perplexity(sentence):
+    s = ["<s>"] + sentence.split() + ["</s>"]
+    n = len(s) - 1                       # number of predicted tokens
+    logprob = sentence_logprob(sentence)
+    return math.exp(-logprob / n)        # PP = exp(-avg log prob)
+
+fluent = "the cat sat on the mat"
+weird  = "mat the log cat ran dog"
+print(f"P('{fluent}')  log-prob: {sentence_logprob(fluent):.2f}")
+print(f"perplexity (fluent): {perplexity(fluent):.2f}")
+print(f"perplexity (weird):  {perplexity(weird):.2f}")
+
+# Expected: the fluent sentence has LOWER perplexity than the scrambled one,
+# because the model (trained on similar text) is less 'surprised' by it.
+# perplexity (fluent): ~4.5
+# perplexity (weird):  ~9.0
+`} />
+
+The model assigns the fluent sentence lower perplexity than the scrambled one — it is less surprised by text resembling its training corpus, exactly as a good language model should be. The add-one smoothing ensures even unseen bigrams get nonzero probability, avoiding the zero-probability catastrophe. This bigram model is the humble ancestor of GPT: same objective (predict the next word), same metric (perplexity), just counting instead of a trillion-parameter Transformer.
+
+<KeyTakeaways phase={1}>
+- A **language model** assigns probabilities to word sequences, equivalently predicting the next word — the foundation of all generative NLP, including LLMs.
+- **N-gram models** estimate probabilities by counting; the **Markov assumption** conditions each word on only the previous n−1 words, making estimation tractable but limiting context.
+- **Sparsity** makes most n-grams unseen (zero probability); **smoothing** (Laplace, Kneser-Ney) shifts mass to unseen n-grams and is essential.
+- **Perplexity** measures how well a model predicts held-out text (lower is better) — the exponentiated average negative log-probability.
+- Perplexity's intuition is the **branching factor**: the average number of equally-likely words the model is choosing among at each step.
+- **Neural language models** (RNNs, Transformers, GPT) replace counting with learned representations but share the same objective and the same perplexity metric.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Which sentence will a well-trained language model assign LOWER perplexity, and why?",
+    options: ["A scrambled sentence, because it is shorter", "A fluent, in-distribution sentence, because the model is less 'surprised' by it (assigns it higher probability)", "Both equal", "The longer one always"],
+    correctIndex: 1,
+    explanation: "Perplexity is lower when the model assigns higher probability to the text. A fluent sentence resembling the training data is predicted well (low surprise → low perplexity); a scrambled one is surprising (high perplexity)."
+  },
+  {
+    question: "What problem does smoothing solve in n-gram models?",
+    options: ["Slow training", "Sparsity — unseen n-grams get zero probability, which makes any sentence containing them impossible; smoothing shifts mass to unseen n-grams", "Too much memory", "Bias in embeddings"],
+    correctIndex: 1,
+    explanation: "Most possible n-grams never appear in a finite corpus, so their counts (and probabilities) are zero, and one zero makes the whole sentence probability zero. Smoothing gives unseen n-grams nonzero probability."
+  },
+  {
+    question: "What is the intuitive meaning of a perplexity of 50?",
+    options: ["The model has 50 layers", "On average, the model is about as uncertain as if choosing uniformly among 50 words at each step (the branching factor)", "The text has 50 words", "The model is 50% accurate"],
+    correctIndex: 1,
+    explanation: "Perplexity is an average branching factor: a perplexity of 50 means the model's uncertainty per position is equivalent to picking among 50 equally-likely words. Lower perplexity means less uncertainty."
+  }
+]} />
+
+## What's Next
+
+N-gram models are crippled by their fixed, short context. The next leap is models that maintain a memory of the entire sequence so far. In **Sequence Models — RNN, LSTM & GRU**, we study the recurrent networks that process text sequentially with a hidden state, the era of neural NLP just before attention arrived.

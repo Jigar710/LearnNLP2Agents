@@ -1,0 +1,175 @@
+---
+title: "T5, BART & Encoder-Decoder LLMs"
+subtitle: "When you need both understanding AND generation"
+phase: 3
+topicNumber: 22
+slug: "t5-bart-encoder-decoder"
+readingTime: 14
+prerequisites: ["transformer-architecture"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('t5-bart-encoder-decoder');
+
+<TopicHero topic={topic} />
+
+The last two topics gave us the two great extremes: BERT, an encoder that understands but cannot generate, and GPT, a decoder that generates and, at scale, understands too. Between them sits a third design that keeps *both* stacks — the **encoder-decoder** model. When a task takes one piece of text and produces a transformed version of it (translate this, summarize this, answer this question about this passage), having an encoder build a deep bidirectional representation of the input *and* a decoder generate the output is a natural fit. This topic covers the two most influential encoder-decoder LLMs, **T5** and **BART**, and the elegant "everything is text-to-text" framing that made T5 so general.
+
+You already built the full encoder-decoder Transformer in Topic 17, so the architecture here is familiar. What is new is the *pre-training objective* each model uses and the philosophy each embodies. We will see T5's span corruption and text-to-text unification, BART's denoising-autoencoder approach, how they compare to BERT and GPT, and how to run them for summarization and question answering.
+
+## Why encoder-decoder models?
+
+Recall the trade-offs. An encoder-only model (BERT) sees the whole input bidirectionally — great for understanding — but cannot generate fluent output. A decoder-only model (GPT) generates beautifully but processes its input with causal, leftward-only attention, which is slightly less ideal for deeply understanding a fixed input. Encoder-decoder models get the best of both: the **encoder** reads the entire input with full bidirectional attention, building rich representations, and the **decoder** generates the output autoregressively while attending to those representations through cross-attention.
+
+This makes them especially strong on **sequence-to-sequence** tasks where input and output are distinct and the mapping is non-trivial: translation, summarization, grammatical correction, and question answering where the answer must be generated. The encoder can fully digest the source before a single output token is produced.
+
+## T5: text-to-text transfer transformer
+
+T5's central idea is breathtakingly simple: **frame every NLP task as text-to-text.** Classification, translation, summarization, regression, question answering — all are recast as "take this text, produce that text." Sentiment becomes "sst2 sentence: the movie was great" → "positive". Translation becomes "translate English to German: hello" → "hallo". Even a numeric similarity score is generated as a text string. By giving every task the same input-output format, T5 can be trained and fine-tuned with one uniform recipe and one model, and it can multitask across many problems at once.
+
+## T5's span corruption
+
+T5 is pre-trained with **span corruption**, a denoising objective. Rather than masking single tokens like BERT, T5 masks *contiguous spans* of tokens, replaces each span with a unique sentinel token, and trains the decoder to generate the missing spans. Input "The cat sat on the mat" might become "The cat ‹X› on ‹Y›" and the target becomes "‹X› sat ‹Y› the mat". This forces the model to learn both bidirectional understanding (in the encoder) and generation (in the decoder) in one objective, and it matches the encoder-decoder architecture better than single-token masking.
+
+<Callout type="tip">
+Span corruption is a clever fit for encoder-decoder models: the encoder reads the corrupted text with full context, and the decoder must *generate* the missing spans — exercising exactly the read-then-write capability the architecture is built for.
+</Callout>
+
+## T5 fine-tuning and variants
+
+Because every task is text-to-text, fine-tuning T5 means continuing to train it to map a task-formatted input string to the desired output string — no task-specific heads, just different text. T5 came in a range of sizes from T5-small (60M) to T5-11B, and **mT5** extended it to over 100 languages. The text-to-text framing later made T5 an ideal base for *instruction tuning*: **Flan-T5** (Topic 25) instruction-tuned T5 on hundreds of tasks and, remarkably, outperformed much larger raw models on many benchmarks, proving that how you train can matter as much as how big you are.
+
+## BART: denoising autoencoder
+
+BART (Bidirectional and Auto-Regressive Transformer) takes a related but distinct approach. It is pre-trained as a **denoising autoencoder**: corrupt the input text with various noise functions — token masking, token deletion, sentence shuffling, text infilling — and train the model to reconstruct the *original* text. The encoder reads the corrupted version bidirectionally; the decoder regenerates the clean original autoregressively. Because BART's noise can be arbitrary (not just masking), it learns a flexible mapping from damaged to clean text, which transfers especially well to generation tasks.
+
+BART excels at **summarization, translation, and text infilling**. Its denoising pre-training makes it a strong generator that still has a full bidirectional encoder, and fine-tuned BART set strong results on summarization benchmarks. Where T5 emphasizes a unified text-to-text interface, BART emphasizes robust reconstruction, but both are encoder-decoder models that read fully and generate fluently.
+
+## Comparing the four paradigms
+
+<ComparisonTable
+  phase={3}
+  headers={["Model", "Architecture", "Pre-training", "Best at"]}
+  rows={[
+    ["BERT", "Encoder only", "Masked LM (single tokens)", "Understanding: classification, NER, retrieval"],
+    ["GPT", "Decoder only", "Causal LM (next token)", "Generation, in-context learning, chat"],
+    ["T5", "Encoder-decoder", "Span corruption (text-to-text)", "Seq2seq, multitask, instruction-tuned (Flan)"],
+    ["BART", "Encoder-decoder", "Denoising autoencoder", "Summarization, translation, infilling"],
+  ]}
+  caption="Four families, three architectures, four objectives."
+/>
+
+## When to use which
+
+A practical heuristic. Reach for an **encoder** (BERT family) when you need a representation for classification, retrieval, or tagging and have labelled data — they are small, fast, and excellent. Reach for a **decoder** (GPT/Claude family) when you need open-ended generation, chat, in-context learning, or a single model that handles many tasks by prompt. Reach for an **encoder-decoder** (T5/BART) for focused sequence-to-sequence tasks — translation, summarization — especially when you will fine-tune on task data and want strong quality at modest size. In the era of large decoder-only LLMs, much seq2seq work has shifted to prompting a big decoder, but encoder-decoder models remain efficient, high-quality choices for well-defined transformation tasks.
+
+## The data behind T5: C4 and a systematic study
+
+T5 was not just a model; it was an unusually careful *study* of what makes pre-training work, and that is part of why it remains worth knowing. To run that study, its authors built the **C4** corpus — the Colossal Clean Crawled Corpus — by taking Common Crawl and aggressively filtering it: removing boilerplate, deduplicating, dropping pages with offensive content, and keeping only natural-language English. The cleaning mattered enormously; training on raw Common Crawl produced visibly worse models than training on the cleaned C4, an early, concrete demonstration of the "data quality beats quantity" lesson from Phase 1.
+
+With C4 in hand, the T5 paper systematically varied one factor at a time — architecture, objective, corpus, fine-tuning strategy, and model size — and reported what helped. Among the findings: the encoder-decoder architecture with a span-corruption objective was a strong general choice; more and cleaner data reliably helped; and multitask pre-training combined with fine-tuning worked well. This empirical, ablation-driven style set a template for the field. When you read modern model reports that carefully isolate the contribution of each design choice, they are following the path T5 charted. The model is useful; the methodology was arguably more influential.
+
+## Prefix LM and the spectrum of attention masks
+
+T5 and BART also clarify that "encoder-only," "decoder-only," and "encoder-decoder" are points on a *spectrum* defined by attention masking, not three unrelated species. Consider a single Transformer stack and ask only one question: which positions may each position attend to? If every position attends to every other, you have a bidirectional encoder. If each position attends only to earlier positions, you have a causal decoder. And there is a useful middle ground, the **prefix language model**, where a "prefix" region (the input) is attended to bidirectionally while the continuation (the output) is generated causally. UniLM and some T5 variants use exactly this.
+
+Seeing the masks as a spectrum demystifies a lot. An encoder-decoder model is, in a sense, a prefix LM split across two stacks with cross-attention connecting them — the encoder is the fully-visible prefix, the decoder is the causal continuation. This is why all of these models share the same code and the same building blocks from Topic 17, and why a single modern decoder-only LLM, prompted with an input then asked to continue, can imitate much of what a dedicated encoder-decoder does. The architecture diagram differs, but the underlying machinery and the masking choices are the real degrees of freedom.
+
+## The decline and quiet persistence of encoder-decoders
+
+Honesty requires noting that, for general-purpose AI, the field largely converged on decoder-only models, not encoder-decoders. The reasons echo Topic 16: a single stack is simpler to scale, trains on raw text with one uniform next-token objective, and naturally supports in-context learning, where input and output blur into one stream. The largest, most capable frontier models are overwhelmingly decoder-only, and much of the sequence-to-sequence work that once demanded a T5 or BART is now done by prompting a big decoder.
+
+Yet encoder-decoders persist where their structure is an advantage. For focused, high-volume transformation tasks — production translation, document summarization at scale, grammatical error correction — a fine-tuned T5 or BART of modest size can match or beat a giant decoder while being far cheaper to run, because the bidirectional encoder digests the input efficiently and the model is small. They also remain important in multimodal and speech systems, where an encoder processes one modality and a decoder generates another. So the practical lesson is not that encoder-decoders are obsolete, but that they are a specialized tool: when you have a clear input-to-output mapping, a fixed task, and a desire for efficiency, they are often the right and economical choice, even as the spotlight sits on decoder-only LLMs.
+
+## Multilingual and multimodal reach
+
+Encoder-decoder models have been especially fruitful beyond English text, and it is worth seeing why. **mT5** and **mBART** extended T5 and BART to dozens or hundreds of languages by training on multilingual corpora with a shared subword vocabulary. The encoder-decoder shape is a natural fit for translation, which is the archetypal sequence-to-sequence task, and these multilingual variants powered strong open translation and cross-lingual transfer — a model fine-tuned on a task in high-resource languages often performs respectably in low-resource ones it never saw fine-tuning data for, because the shared encoder learned language-agnostic representations.
+
+The same read-then-write structure generalizes to **multimodal** settings. Speech recognition systems pair an audio encoder with a text decoder; image captioning pairs a vision encoder with a text decoder; and many document-understanding and text-to-image pipelines are encoder-decoder at heart. Whenever a system must consume one kind of input and produce a different kind of output, the encoder-decoder template — fully digest the source, then generate the target with cross-attention bridging them — is a recurring and effective pattern. This breadth is a reminder that the architectural ideas of Phase 2 are not narrowly about language: an encoder turns *some* sequence into representations, a decoder turns representations into *some* sequence, and the modalities at each end are interchangeable. The T5 and BART you run below are the text-to-text instance of a far more general design.
+
+## Code Example
+
+The code uses T5 for question answering (formatted as text-to-text) and BART for summarization, both through the HuggingFace `transformers` library.
+
+<CodeBlock lang="python" filename="t5_bart_demo.py" code={`# t5_bart_demo.py
+# pip install transformers torch
+from transformers import pipeline
+
+# --- T5: everything is text-to-text ---
+t5 = pipeline("text2text-generation", model="t5-small")
+
+# Question answering, formatted as a text-to-text prompt
+qa_input = ("question: What does the encoder do? "
+            "context: In a transformer, the encoder reads the input "
+            "bidirectionally and produces contextual representations.")
+print("T5 QA:", t5(qa_input, max_new_tokens=30)[0]["generated_text"])
+
+# Translation, same model, just a different task prefix
+print("T5 MT:", t5("translate English to German: Good morning",
+                    max_new_tokens=20)[0]["generated_text"])
+
+# --- BART: summarization ---
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+article = (
+    "Encoder-decoder models keep both a bidirectional encoder and an "
+    "autoregressive decoder. The encoder reads the entire input, while the "
+    "decoder generates output tokens one at a time, attending to the encoder "
+    "through cross-attention. This makes them well suited to tasks that map "
+    "one piece of text to another, such as translation and summarization."
+)
+out = summarizer(article, max_length=40, min_length=15, do_sample=False)
+print("\\nBART summary:", out[0]["summary_text"])
+
+# Expected (abridged):
+# T5 QA: reads the input bidirectionally and produces representations
+# T5 MT: Guten Morgen
+# BART summary: Encoder-decoder models keep a bidirectional encoder and
+#               an autoregressive decoder ...
+`} />
+
+Notice how T5 performs two different tasks — QA and translation — with the *same model*, distinguished only by the task prefix in the input string. That is the text-to-text philosophy in action. BART, meanwhile, takes a paragraph and generates a faithful, shorter version, showcasing the read-then-write strength of encoder-decoder models. Both are the architecture from Topic 17, differing only in their pre-training objective.
+
+<KeyTakeaways phase={3}>
+- **Encoder-decoder** models keep a bidirectional encoder (full understanding) and an autoregressive decoder (fluent generation), ideal for sequence-to-sequence tasks.
+- **T5** frames *every* task as **text-to-text**, enabling one uniform recipe; it is pre-trained with **span corruption** (mask contiguous spans, generate them).
+- **BART** is a **denoising autoencoder**: corrupt text with varied noise, reconstruct the original — strong for summarization, translation, infilling.
+- The text-to-text framing made T5 a great base for **instruction tuning** (Flan-T5), which beat much larger models.
+- **Choose by task**: encoders for understanding/retrieval, decoders for generation/chat/in-context learning, encoder-decoders for focused seq2seq.
+- All three are the same Transformer building blocks — the difference is architecture wiring and pre-training objective.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What is T5's core design principle?",
+    options: ["It uses only an encoder", "Every NLP task is framed as text-to-text", "It removes attention", "It is decoder-only"],
+    correctIndex: 1,
+    explanation: "T5 casts every task — classification, translation, QA, even regression — as mapping an input text string to an output text string, allowing one model and one recipe to handle them all."
+  },
+  {
+    question: "How does T5's span corruption differ from BERT's masking?",
+    options: ["It masks single tokens like BERT", "It masks contiguous spans and the decoder generates the missing spans", "It shuffles all words", "It does no masking"],
+    correctIndex: 1,
+    explanation: "T5 masks contiguous spans (replaced by sentinel tokens) and trains the decoder to generate them, fitting the encoder-decoder architecture, whereas BERT predicts individual masked tokens with an encoder only."
+  },
+  {
+    question: "When is an encoder-decoder model like BART or T5 most appropriate?",
+    options: ["Pure classification with labelled data", "Sequence-to-sequence tasks like translation and summarization", "Only for embeddings", "Tasks needing no input"],
+    correctIndex: 1,
+    explanation: "Encoder-decoder models shine on seq2seq tasks where an input must be fully understood and then transformed into a generated output, such as translation and summarization."
+  }
+]} />
+
+## What's Next
+
+We have now seen masked LM (BERT), causal LM (GPT), span corruption (T5), and denoising (BART). In **Pre-training Objectives — MLM, CLM & Span Corruption**, we put all of these side by side, add a few more, and analyze which objective suits which architecture and why — implementing the two core losses from scratch.

@@ -1,0 +1,181 @@
+---
+title: "DPO — Direct Preference Optimization"
+subtitle: "Alignment without reinforcement learning — simpler and more stable"
+phase: 3
+topicNumber: 27
+slug: "dpo"
+readingTime: 15
+prerequisites: ["rlhf"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('dpo');
+
+<TopicHero topic={topic} />
+
+RLHF aligned ChatGPT, but its machinery is heavy: a separate reward model, a reinforcement-learning loop, a frozen reference, a value function, and the notoriously finicky PPO algorithm. In 2023, **Direct Preference Optimization (DPO)** showed that all of this could be replaced by a *single supervised loss* — no reward model, no RL, no sampling loop — while optimizing the very same objective. DPO is simpler, more stable, and cheaper, and it rapidly became the default alignment method for open-source models. This topic explains the elegant insight behind it, derives its loss, and compares it to RLHF and its growing family of variants.
+
+DPO is a beautiful piece of work because it does not approximate RLHF — it provably optimizes the *same* objective by a clever reparameterization. Understanding why is one of the more satisfying derivations in modern machine learning, and it changes how you think about what a reward model really is.
+
+## The problems DPO solves
+
+Recall RLHF's pain points from the last topic: training a separate reward model, running an unstable PPO loop, keeping multiple large models in memory at once (policy, reference, reward, value), tuning the KL coefficient and PPO hyperparameters, and guarding against reward hacking. Each adds cost, complexity, and a way to fail. The natural question: is the reward model and the RL loop actually *necessary*, or just one way to reach the goal? DPO's answer is that they are not necessary at all.
+
+## The DPO insight: the reward is implicit in the policy
+
+Here is the key realization. The RLHF objective — maximize reward subject to a KL penalty against the reference — has a known *closed-form* optimal policy: the optimal policy is the reference policy reweighted by the exponentiated reward. You can algebraically *invert* that relationship to express the reward in terms of the optimal policy and the reference policy. In other words, **the reward is implicitly defined by the language model itself** relative to the reference; you do not need a separate reward model to represent it.
+
+Substitute that implicit reward back into the reward-model's Bradley-Terry preference loss, and the reward model vanishes — you are left with a loss expressed entirely in terms of the policy you are training and the frozen reference. Optimizing that loss directly on preference pairs trains the policy to satisfy the preferences, achieving the RLHF objective with ordinary supervised gradient descent. No reward model, no RL.
+
+<Callout type="tip">
+The DPO title says it well: "Your Language Model is Secretly a Reward Model." The trained policy's log-probability ratio against the reference *is* the implicit reward, so you can optimize preferences directly without ever materializing a separate reward network.
+</Callout>
+
+## The Mathematics
+
+DPO trains the policy `π_θ` against a frozen reference `π_ref` on preference pairs (prompt `x`, winning response `y_w`, losing response `y_l`). The loss is a binary cross-entropy on the difference of log-probability ratios:
+
+<MathBlock
+  formula="\mathcal{L}_{\text{DPO}} = -\log \sigma\!\left( \beta \log \frac{\pi_\theta(y_w \mid x)}{\pi_{\text{ref}}(y_w \mid x)} - \beta \log \frac{\pi_\theta(y_l \mid x)}{\pi_{\text{ref}}(y_l \mid x)} \right)"
+  caption="The DPO loss: push up the policy's relative likelihood of the preferred response and down that of the rejected one."
+/>
+
+Read it against the Bradley-Terry reward loss from Topic 26. There, the term inside `σ` was `r(x,y_w) − r(x,y_l)`, a difference of *reward-model* scores. Here, that difference is replaced by `β` times the difference of **log-probability ratios** of the policy against the reference. The quantity:
+
+<MathBlock
+  formula="\hat{r}(x, y) = \beta \log \frac{\pi_\theta(y \mid x)}{\pi_{\text{ref}}(y \mid x)}"
+  caption="The implicit reward: how much more (or less) likely the policy makes a response relative to the reference."
+/>
+
+is the *implicit reward* — the policy's own log-ratio against the reference. DPO simply trains this implicit reward to satisfy the preferences. The `β` plays the same role as RLHF's KL coefficient, controlling how far the policy may move from the reference.
+
+## DPO vs RLHF
+
+DPO and RLHF optimize the *same* theoretical objective (reward maximization under a KL constraint), but DPO does it with one supervised loss instead of a reward model plus PPO. The benefits: dramatically simpler to implement, far more stable to train, cheaper in memory (only the policy and a frozen reference, no reward or value networks), and no sampling loop. The trade-offs: DPO trains on a *fixed* dataset of preferences and cannot explore new responses the way online RL can, and it can be more sensitive to the quality and coverage of that dataset. In practice, DPO matches or beats PPO-based RLHF on many benchmarks while being a fraction of the effort, which is why it became the standard for open models.
+
+## The DPO family: IPO, KTO, SimPO
+
+DPO spawned variants that tweak its assumptions. **IPO (Identity Preference Optimization)** modifies the loss to reduce overfitting to preferences when the data is noisy or deterministic. **KTO (Kahneman-Tversky Optimization)** drops the need for *paired* comparisons entirely, learning from individual responses each labelled simply "good" or "bad" — useful when you have thumbs-up/down feedback rather than A-vs-B pairs. **SimPO** removes the reference model, using the average log-probability of a sequence as the implicit reward, simplifying further. Each trades some of DPO's assumptions for practicality in a different data regime.
+
+## When to use DPO vs PPO
+
+A practical rule. Use **DPO** (or a variant) when you have a fixed dataset of preference pairs and want simple, stable, cheap alignment — which covers most open-model and fine-tuning scenarios. Consider **PPO-based RLHF** when you can afford the complexity and want *online* optimization, where the model explores and is scored on its own fresh generations, which can squeeze out extra quality at the frontier. For most practitioners most of the time, DPO is the right default; PPO is the heavyweight option for labs chasing the last increment of alignment quality. Common DPO datasets include Anthropic's HH (helpful/harmless), UltraFeedback, and OpenHermes-Preferences.
+
+## Length, verbosity, and the failure modes DPO inherits
+
+DPO is simpler than RLHF, but it does not magically escape all of RLHF's problems, and knowing the shared failure modes keeps you honest. The most common is a **length and verbosity bias**. Because preference datasets — whether labelled by humans or AI — tend to mildly favour longer, more thorough-looking answers, DPO will happily amplify that signal, producing models that pad responses to seem more complete. SimPO and several length-normalized DPO variants were introduced partly to counter this, by dividing the implicit reward by sequence length so that the model is not rewarded merely for writing more.
+
+A subtler issue is that DPO, optimizing a fixed dataset, can **reduce the probability of both responses** in a pair while still increasing the *gap* between them — technically satisfying the preference while making the model less likely to produce either good answer. This counterintuitive behaviour, studied in follow-up work, is one reason the choice of `β` and careful monitoring of the implicit rewards during training matter. The broad lesson is that turning preferences into a loss, by any method, optimizes exactly what the preference data encodes — including its biases. Neither RLHF nor DPO can align a model better than the preference signal it is given, and both will exploit any systematic quirk in that signal. Clean, well-designed preference data remains the foundation, and the algorithm sitting on top is the easier half of the problem.
+
+## DPO in the modern alignment pipeline
+
+In practice, DPO is rarely used in isolation; it is one stage in a sequence. A typical modern recipe is: pre-train the base model, apply supervised fine-tuning (SFT, Topic 25) to install instruction-following, then run DPO on preference pairs to refine which responses the model prefers. Some pipelines iterate the last step — generate fresh responses with the current model, collect new preferences over them, and run another round of DPO — which recovers some of the *online* benefit of RL while keeping each round's training as a simple supervised loss. This **iterative DPO** has become a popular middle ground.
+
+The reference model in DPO is almost always the SFT model itself, frozen. This matters: the implicit reward measures movement *away from the SFT policy*, so DPO is fundamentally a *refinement* of an already-instruction-tuned model, not a from-scratch alignment. If you tried to run DPO directly on a raw pre-trained base, with no SFT stage, the reference would be a poor anchor and the results would suffer. The staged structure — pre-train, then SFT, then preference optimization — that we first met with RLHF carries over essentially unchanged to DPO; only the final stage's machinery is simpler. Seeing DPO as a drop-in replacement for *just the PPO part* of RLHF, rather than for the whole pipeline, is the accurate way to place it.
+
+## Online versus offline preference learning
+
+The deepest distinction between DPO and PPO-RLHF is **offline versus online**. DPO is *offline*: it learns from a fixed, pre-collected dataset of preference pairs and never generates new responses during training. PPO-RLHF is *online*: the policy generates fresh responses, those responses are scored, and the policy updates on its own outputs, repeating in a loop. Online learning has a real advantage — it can discover and correct failure modes that only appear in the model's *current* generations, which a fixed offline dataset (collected from an earlier model) may not cover. As the policy improves, an offline dataset becomes progressively less representative of what the policy actually produces, a distribution-shift problem online RL avoids by construction.
+
+This is why the frontier labs, chasing the last increments of quality and safety, often still invest in online RL despite its cost, while the broad open-source community standardized on DPO for its simplicity. Iterative DPO and online DPO variants try to bridge the gap, periodically refreshing the preference data with the current model's outputs. For a practitioner, the decision tree is clear: start with DPO for its stability and low cost; reach for online methods only if you have the infrastructure and evidence that offline preference optimization has plateaued for your use case. Understanding the offline/online axis — and that it, not the specific loss, is the substantive difference — lets you reason about alignment methods that have not even been invented yet, since new techniques will still sit somewhere on that spectrum.
+
+## Code Example
+
+The code computes the DPO loss from scratch given log-probabilities, making the relationship to the reward loss explicit, then shows the high-level TRL `DPOTrainer` interface.
+
+<CodeBlock lang="python" filename="dpo_demo.py" code={`# dpo_demo.py
+# pip install trl transformers torch
+import torch
+import torch.nn.functional as F
+
+# Per-sequence log-probabilities (sum of token log-probs) for a batch.
+# In practice these come from running the policy and frozen reference models.
+#                        policy        reference
+logp_win_policy  = torch.tensor([-12.0, -8.0, -20.0])
+logp_lose_policy = torch.tensor([-15.0, -7.5, -19.0])
+logp_win_ref     = torch.tensor([-13.0, -8.0, -22.0])
+logp_lose_ref    = torch.tensor([-14.0, -8.0, -21.0])
+
+beta = 0.1
+
+# Implicit rewards = beta * (log pi_theta - log pi_ref)
+r_win  = beta * (logp_win_policy  - logp_win_ref)
+r_lose = beta * (logp_lose_policy - logp_lose_ref)
+
+# DPO loss = -log sigmoid(r_win - r_lose)   (same form as the Bradley-Terry RM loss!)
+dpo_loss = -F.logsigmoid(r_win - r_lose).mean()
+print("implicit reward (win):", r_win.numpy().round(3))
+print("implicit reward (lose):", r_lose.numpy().round(3))
+print("DPO loss:", round(dpo_loss.item(), 4))
+
+# --- High-level TRL interface (what you actually run) ---
+# from trl import DPOTrainer, DPOConfig
+# from transformers import AutoModelForCausalLM, AutoTokenizer
+#
+# model = AutoModelForCausalLM.from_pretrained("sft-model")   # the SFT policy
+# ref   = AutoModelForCausalLM.from_pretrained("sft-model")   # frozen reference
+# trainer = DPOTrainer(model, ref, args=DPOConfig(beta=0.1),
+#                      train_dataset=preference_pairs, tokenizer=tok)
+# trainer.train()   # one supervised loss, no reward model, no PPO loop
+
+# Expected:
+# implicit reward (win):  [ 0.1   0.    0.2 ]
+# implicit reward (lose): [-0.1   0.05  0.2 ]
+# DPO loss: ~0.65
+`} />
+
+The from-scratch loss makes the connection unmistakable: DPO's loss is the *same* `−log σ(r_win − r_lose)` form as the reward-model loss from Topic 26, except the rewards are the policy's own log-ratios against the reference rather than a separate network's outputs. That single substitution collapses the entire RLHF pipeline into one supervised loss. The `DPOTrainer` snippet is all the code most practitioners need — point it at an SFT model and a preference dataset, and it aligns the model with no reinforcement learning at all.
+
+<PaperLink
+  title="Direct Preference Optimization: Your Language Model is Secretly a Reward Model"
+  authors="Rafailov, Sharma, Mitchell, et al."
+  year={2023}
+  venue="NeurIPS"
+  url="https://arxiv.org/abs/2305.18290"
+/>
+
+<KeyTakeaways phase={3}>
+- **DPO** achieves RLHF's objective (reward maximization under a KL constraint) with a **single supervised loss** — no reward model, no PPO, no RL loop.
+- The key insight: the RLHF-optimal policy has a closed form, which can be inverted so the **reward is implicit in the policy** relative to the reference.
+- The **DPO loss** is `−log σ` of the difference in `β`-scaled **log-probability ratios** of the preferred vs rejected response — the same form as the Bradley-Terry RM loss.
+- DPO is **simpler, more stable, and cheaper** than PPO-RLHF, but trains on a fixed dataset and cannot explore new responses online.
+- Variants — **IPO** (noise-robust), **KTO** (unpaired good/bad labels), **SimPO** (no reference) — adapt DPO to different data regimes.
+- DPO is the **default for open models**; PPO-RLHF remains the heavyweight option for online, frontier alignment.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What does DPO use instead of an explicit reward model?",
+    options: ["A larger language model", "The policy's own log-probability ratio against a frozen reference, as an implicit reward", "Human labels at every step", "A value function only"],
+    correctIndex: 1,
+    explanation: "DPO derives that the reward is implicitly the β-scaled log-ratio of the policy to the reference. Substituting this into the preference loss removes the separate reward model entirely."
+  },
+  {
+    question: "What is the main practical advantage of DPO over PPO-based RLHF?",
+    options: ["It needs no data", "A single stable supervised loss — no reward model, no RL loop, lower memory and complexity", "It is the only method that works", "It removes the reference model"],
+    correctIndex: 1,
+    explanation: "DPO collapses the multi-model RL pipeline into one supervised loss over preference pairs, making it far simpler, more stable, and cheaper, while optimizing the same objective."
+  },
+  {
+    question: "What is one limitation of DPO compared to online PPO-RLHF?",
+    options: ["It cannot use preferences", "It trains on a fixed preference dataset and cannot explore new responses the way online RL can", "It requires a reward model", "It is always less stable"],
+    correctIndex: 1,
+    explanation: "DPO optimizes a fixed set of preference pairs offline, so unlike online RL it does not generate and score fresh responses, making it more sensitive to dataset coverage and quality."
+  }
+]} />
+
+## What's Next
+
+Alignment shapes *how* a model behaves. The next set of topics tackles a different problem: how to adapt and run these enormous models efficiently. In **Fine-tuning — Full vs Parameter-Efficient (PEFT)**, we see how to specialize a multi-billion-parameter model without updating all its weights.

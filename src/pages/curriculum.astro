@@ -1,0 +1,131 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { PHASES, getTopicsByPhase, TOTAL_TOPICS } from '../data/curriculum';
+import { withBase } from '../utils/base';
+
+const num = (n: number) => String(n).padStart(2, '0');
+---
+<BaseLayout title="Curriculum" description="All 48 topics across 5 phases — track your progress." accent="var(--phase-3)">
+  <div class="curr">
+    <header class="curr-head">
+      <h1 class="curr-title">The Full Curriculum</h1>
+      <p class="curr-sub">48 topics from NLP foundations to production agents. Check topics off as you go — progress is saved in your browser.</p>
+      <div class="curr-progress">
+        <div class="curr-bar"><div id="curr-bar-fill" class="curr-bar-fill"></div></div>
+        <span id="curr-stat" class="curr-stat">0 / {TOTAL_TOPICS} complete</span>
+      </div>
+    </header>
+
+    {PHASES.map((phase) => {
+      const topics = getTopicsByPhase(phase.id);
+      return (
+        <section class="curr-phase" style={`--accent: ${phase.color}`}>
+          <div class="curr-phase-head">
+            <span class="curr-phase-dot" />
+            <h2 class="curr-phase-title">
+              <a href={withBase(`/phase/${phase.id}`)}>Phase {phase.id}: {phase.title}</a>
+            </h2>
+            <span class="curr-phase-badge" data-phase={phase.id}>0/{topics.length}</span>
+          </div>
+          <ul class="curr-list">
+            {topics.map((t) => (
+              <li class="curr-item" data-slug={t.slug}>
+                <label class="curr-check">
+                  <input type="checkbox" class="curr-cb" data-slug={t.slug} />
+                  <span class="curr-cb-box" aria-hidden="true"></span>
+                </label>
+                <span class="curr-num">{num(t.id)}</span>
+                <a class="curr-link" href={withBase(`/topic/${t.slug}`)}>
+                  <span class="curr-name">{t.title}</span>
+                  <span class="curr-meta">{t.readingTime} min{t.hasMath ? ' · math' : ''}{t.hasInteractiveDemo ? ' · demo' : ''}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      );
+    })}
+  </div>
+</BaseLayout>
+
+<style>
+  .curr { max-width: 880px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+  .curr-head { margin-bottom: 2.5rem; }
+  .curr-title { font-family: var(--font-serif); font-weight: 400; font-size: clamp(2rem, 5vw, 3rem); margin: 0 0 0.5rem; }
+  .curr-sub { color: var(--text-secondary); line-height: 1.6; max-width: 64ch; margin: 0 0 1.3rem; }
+  .curr-progress { display: flex; align-items: center; gap: 1rem; }
+  .curr-bar { flex: 1; height: 10px; background: var(--border-color); border-radius: 9999px; overflow: hidden; }
+  .curr-bar-fill { height: 100%; width: 0%; border-radius: 9999px; background: linear-gradient(90deg, var(--phase-1), var(--phase-5)); transition: width 300ms ease; }
+  .curr-stat { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+
+  .curr-phase { margin-bottom: 2rem; }
+  .curr-phase-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.6rem; }
+  .curr-phase-dot { width: 11px; height: 11px; border-radius: 9999px; background: var(--accent); }
+  .curr-phase-title { font-size: 1.15rem; font-weight: 600; margin: 0; flex: 1; }
+  .curr-phase-title a { color: var(--text-primary); }
+  .curr-phase-title a:hover { color: var(--accent); }
+  .curr-phase-badge { font-size: 0.72rem; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 2px 9px; border-radius: 9999px; }
+
+  .curr-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; }
+  .curr-item { display: flex; align-items: center; gap: 0.7rem; padding: 0.6rem 0.9rem; border-top: 1px solid var(--border-subtle); }
+  .curr-item:first-child { border-top: none; }
+  .curr-item.is-complete { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+
+  .curr-check { position: relative; display: inline-flex; cursor: pointer; }
+  .curr-cb { position: absolute; opacity: 0; width: 20px; height: 20px; cursor: pointer; }
+  .curr-cb-box { width: 20px; height: 20px; border: 2px solid var(--border-color); border-radius: 6px; display: grid; place-items: center; transition: all 150ms ease; }
+  .curr-cb:checked + .curr-cb-box { background: var(--accent); border-color: var(--accent); }
+  .curr-cb:checked + .curr-cb-box::after { content: ''; width: 5px; height: 9px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg) translateY(-1px); }
+
+  .curr-num { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted); width: 1.6em; }
+  .curr-link { flex: 1; display: flex; justify-content: space-between; align-items: center; gap: 1rem; color: var(--text-primary); min-width: 0; }
+  .curr-link:hover .curr-name { color: var(--accent); }
+  .curr-name { font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .curr-meta { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+</style>
+
+<script>
+  const KEY = 'nlp2agents-progress';
+  function read(): string[] { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch { return []; } }
+  function write(list: string[]) { localStorage.setItem(KEY, JSON.stringify([...new Set(list)])); document.dispatchEvent(new CustomEvent('nlp2agents:progress')); }
+
+  function sync() {
+    const done = new Set(read());
+    let total = 0, complete = 0;
+    document.querySelectorAll<HTMLElement>('.curr-phase').forEach((sec) => {
+      const items = Array.from(sec.querySelectorAll<HTMLElement>('.curr-item'));
+      let c = 0;
+      items.forEach((li) => {
+        const slug = li.dataset.slug!;
+        const on = done.has(slug);
+        li.classList.toggle('is-complete', on);
+        const cb = li.querySelector<HTMLInputElement>('.curr-cb');
+        if (cb) cb.checked = on;
+        if (on) c++;
+      });
+      total += items.length; complete += c;
+      const badge = sec.querySelector('.curr-phase-badge');
+      if (badge) badge.textContent = `${c}/${items.length}`;
+    });
+    const pct = total ? Math.round((complete / total) * 100) : 0;
+    const fill = document.getElementById('curr-bar-fill');
+    if (fill) fill.style.width = pct + '%';
+    const stat = document.getElementById('curr-stat');
+    if (stat) stat.textContent = `${complete} / ${total} complete (${pct}%)`;
+  }
+
+  document.querySelectorAll<HTMLInputElement>('.curr-cb').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const slug = cb.dataset.slug!;
+      const list = read();
+      const i = list.indexOf(slug);
+      if (cb.checked && i === -1) list.push(slug);
+      else if (!cb.checked && i !== -1) list.splice(i, 1);
+      write(list);
+      sync();
+    });
+  });
+  document.addEventListener('nlp2agents:progress', sync);
+  window.addEventListener('storage', (e) => { if (e.key === KEY) sync(); });
+  sync();
+</script>

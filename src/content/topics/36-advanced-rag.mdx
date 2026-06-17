@@ -1,0 +1,169 @@
+---
+title: "Advanced RAG — Re-ranking, HyDE & Query Expansion"
+subtitle: "Fixing naive RAG's failures with smarter retrieval strategies"
+phase: 4
+topicNumber: 36
+slug: "advanced-rag"
+readingTime: 16
+prerequisites: ["vector-databases-retrieval"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('advanced-rag');
+
+<TopicHero topic={topic} />
+
+Naive RAG — embed the query, grab the top-k chunks, generate — works in demos and disappoints in production. It retrieves the wrong chunks when the query is phrased differently from the documents, floods the model with noisy near-misses, and fragments answers across chunk boundaries. **Advanced RAG** is the toolkit for fixing these failures: rewriting queries, generating hypothetical documents, retrieving multiple ways, and re-ranking results so the truly relevant chunks rise to the top. These techniques routinely turn a mediocre RAG system into a reliable one, and they are where most real RAG engineering effort goes.
+
+This topic surveys the high-leverage upgrades: query rewriting, HyDE, multi-query retrieval, cross-encoder re-ranking, parent-child chunking, contextual compression, and adaptive approaches like Self-RAG and RAPTOR. The code implements HyDE and re-ranking, two of the most impactful.
+
+## Naive RAG's failure modes
+
+Recall from Topic 33 the ways naive RAG breaks. **Bad recall**: the relevant chunk exists but the query embedding does not land near it, often because the question and the document use different vocabulary. **Bad precision**: irrelevant chunks crowd the top-k, distracting the model. **Irrelevant context**: even retrieved chunks may contain mostly noise around a relevant sentence. Each advanced technique targets one of these, and they compose into a pipeline far stronger than the naive baseline.
+
+## Query rewriting
+
+The user's raw query is often a poor search query. It may be conversational ("what about returns?"), underspecified, or phrased unlike the documents. **Query rewriting** uses an LLM to transform the user's question into one or more better search queries — expanding abbreviations, adding context from the conversation, or rephrasing toward how the documents are written. A small LLM call before retrieval frequently lifts recall substantially, because the rewritten query is simply easier to match.
+
+## HyDE: hypothetical document embeddings
+
+**HyDE (Hypothetical Document Embeddings)** is a clever twist on a real problem: a *question* and its *answer* are often phrased very differently, so the question's embedding may not be near the answer document's embedding. HyDE's fix: ask an LLM to *generate a hypothetical answer* to the question first, then embed *that* and use it to retrieve. The hypothetical answer, even if factually imperfect, is written in the style and vocabulary of a real document, so its embedding lands much closer to the genuine answer chunks. You retrieve with a fake answer to find the real one.
+
+<Callout type="tip">
+HyDE works because it bridges the question-answer style gap. A question ("how do I reset my password?") and its answer ("To reset your password, navigate to Settings...") look different to an embedder. A hypothetical answer looks like the real answer, so it retrieves it better.
+</Callout>
+
+## Multi-query retrieval
+
+**Multi-query retrieval** generates *several* paraphrased versions of the query, retrieves for each, and unions the results. Because different phrasings surface different chunks, casting several nets catches relevant documents that any single query would miss. It directly attacks the recall problem — if one phrasing fails to match, another may succeed — at the cost of extra retrieval calls. Combined with deduplication of the merged results, it is a simple, robust recall booster.
+
+## Re-ranking with cross-encoders
+
+The single most impactful advanced technique is **re-ranking**. Fast retrieval (dense or hybrid) uses a **bi-encoder** — it embeds query and documents *separately*, which is fast but coarse. A **cross-encoder** instead reads the query and a candidate document *together* and scores their relevance directly, which is far more accurate but too slow to run over the whole corpus. The two-stage pattern: retrieve a larger candidate set (say top-50) cheaply with the bi-encoder, then **re-rank** those 50 with a cross-encoder and keep the best 5. You get the bi-encoder's speed over the full corpus *and* the cross-encoder's accuracy on the shortlist. Cross-encoder re-rankers like Cohere Rerank, BGE-Reranker, and Jina Reranker deliver large precision gains for modest extra cost.
+
+## Parent-child chunking and contextual compression
+
+Two more techniques address the chunk-granularity tension. **Parent-child chunking** indexes *small* chunks for precise retrieval but, once a small chunk matches, returns its larger *parent* chunk to the model for full context — precise matching with complete context. **Contextual compression** does the opposite trimming: after retrieval, an LLM (or a smaller model) strips each retrieved chunk down to only the sentences relevant to the query, removing noise before generation so the model's context is dense with signal.
+
+## Adaptive RAG: Self-RAG and RAPTOR
+
+Frontier techniques make retrieval *adaptive*. **Self-RAG** trains the model to decide *when* to retrieve at all (some questions need no lookup) and to critique whether retrieved passages are relevant and whether its answer is supported — retrieval on demand with self-reflection. **RAPTOR** builds a *hierarchical* index: it clusters and summarizes chunks recursively into a tree, so retrieval can pull either fine-grained details or high-level summaries depending on the question. These push RAG from a fixed pipeline toward a reasoning process that decides how and what to retrieve, foreshadowing the agentic systems of the next phase where retrieval becomes just one tool the model chooses to use.
+
+## Assembling the full advanced-RAG pipeline
+
+The techniques in this topic are not alternatives; they are *stages* that stack into a pipeline, and seeing the whole assembly clarifies how they fit. A strong production RAG pipeline often runs: take the user query and **rewrite** it (and optionally **HyDE** it or generate **multiple** query variants); run **hybrid retrieval** (dense plus sparse) against the vector store, possibly with **metadata filtering** for access control; gather a generous candidate set of, say, the top 20-50 chunks; **re-rank** those with a cross-encoder down to the best 3-5; optionally **expand** each survivor to its parent chunk or **compress** it to relevant sentences; and finally **generate** an answer grounded strictly in that curated context, with a grounding instruction to cite sources and admit uncertainty.
+
+Each stage has a clear job: query transformation fixes the input, hybrid retrieval maximizes recall, re-ranking maximizes precision, expansion/compression optimizes the context window, and the grounding prompt keeps generation faithful. You rarely need *all* of these — start with hybrid retrieval plus re-ranking, which together address the most common failures, and add the others only when evaluation shows a specific stage is the bottleneck. The discipline is to build the pipeline incrementally, measuring after each addition, rather than assembling the whole baroque chain up front. Most of the quality in a great RAG system comes from a few well-chosen stages applied carefully, not from using every technique at once, and the extra stages add latency and cost that must be justified by measured gains.
+
+## Knowledge graphs and structured retrieval
+
+Vector retrieval is powerful but it is not the only way to ground an LLM, and some questions are better served by *structured* retrieval. **GraphRAG** and knowledge-graph approaches extract entities and relationships from your documents into a graph, then answer questions by traversing that graph rather than (or in addition to) embedding similarity. This shines for questions that require *connecting* facts across many documents — "which products did the team that built X also work on?" — where the answer is a path through relationships that no single chunk contains, and where naive chunk retrieval would have to luckily gather every relevant piece.
+
+More broadly, the best retrieval for a question depends on the question's *shape*. A factual lookup suits vector search; an aggregation ("how many...") or a precise filter ("orders after this date over this amount") suits a query against a structured database; a multi-hop relational question suits a graph. Advanced RAG systems increasingly **route** queries to the appropriate retrieval method, or combine several, rather than forcing everything through vector similarity. This is where RAG begins to blur into the agentic patterns of the next phase: deciding *how* to retrieve, calling the right tool for the question, and reasoning over heterogeneous sources is exactly what a tool-using agent does. Vector RAG is the foundation and the most common case, but recognizing that it is one retrieval strategy among several — and that real questions sometimes need structured or graph retrieval — keeps you from contorting every problem into a similarity search that suits it poorly.
+
+## Diagnosing which stage failed
+
+When an advanced RAG system gives a bad answer, the multi-stage pipeline is a gift for debugging, because you can inspect each stage's output and localize the failure. The disciplined diagnosis walks the pipeline: did the **rewrite** produce a sensible search query, or did it distort the question? Did **retrieval** surface the chunk that actually contains the answer anywhere in its candidate set — if not, the problem is recall, in chunking, embedding, or query transformation. Did **re-ranking** keep that chunk in the final few, or did it get filtered out — if the right chunk was retrieved but dropped, the re-ranker or the cutoff is at fault. And did **generation** use the correct chunk faithfully, or did it ignore or misread it — if the answer was present in the context but the response is still wrong, the problem is in the generation prompt.
+
+This stage-by-stage localization is far more productive than staring at a wrong final answer and guessing. Each stage exposes an intermediate artifact — the rewritten query, the candidate chunks, the re-ranked shortlist, the final context — and logging these in development turns mysterious failures into specific, fixable ones. It also tells you *where to invest*: if retrieval reliably surfaces the right chunk but generation mangles it, more retrieval sophistication is wasted effort and the fix is in the prompt; if the right chunk never appears, no prompt tuning will help and you must improve the indexing or retrieval. This is the same "isolate the failing component" discipline from chunking evaluation, applied to the whole pipeline, and it is what makes advanced RAG systems improvable rather than mysterious. Building observability into each stage from the start is one of the highest-return investments in any serious RAG project, and it sets up the formal evaluation methods of the next topic.
+
+## Code Example
+
+The code implements HyDE (generate a hypothetical answer, embed it, retrieve) and a cross-encoder re-ranking stage, the two highest-impact advanced techniques.
+
+<CodeBlock lang="python" filename="advanced_rag.py" code={`# advanced_rag.py
+# pip install sentence-transformers anthropic numpy
+import os
+import numpy as np
+from sentence_transformers import SentenceTransformer, CrossEncoder
+from anthropic import Anthropic
+
+docs = [
+    "To reset your password, open Settings, click Security, then 'Reset password'.",
+    "Our offices are open Monday to Friday, 9am to 5pm.",
+    "Two-factor authentication can be enabled under Settings > Security.",
+    "Annual plans receive a 20% discount over monthly billing.",
+]
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
+doc_vecs = embedder.encode(docs, normalize_embeddings=True)
+client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+query = "I forgot my login credentials, what do I do?"
+
+# --- HyDE: generate a hypothetical answer, embed THAT, retrieve with it ---
+hyde_prompt = f"Write a one-sentence help-doc answer to: {query}"
+hypo = client.messages.create(
+    model="claude-opus-4-8", max_tokens=80,
+    messages=[{"role": "user", "content": hyde_prompt}],
+).content[0].text
+hv = embedder.encode([hypo], normalize_embeddings=True)
+scores = (doc_vecs @ hv.T).ravel()
+candidates = [docs[i] for i in np.argsort(scores)[::-1][:3]]   # top-3 bi-encoder
+print("HyDE candidates:", candidates)
+
+# --- Re-rank candidates with a cross-encoder (reads query + doc together) ---
+reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+pairs = [(query, c) for c in candidates]
+rerank_scores = reranker.predict(pairs)
+best = candidates[int(np.argmax(rerank_scores))]
+print("re-ranked best:", best)
+
+# Expected:
+# HyDE candidates: ['To reset your password ...', 'Two-factor ...', ...]
+# re-ranked best: To reset your password, open Settings, click Security ...
+`} />
+
+HyDE bridges the gap between the casual question ("I forgot my login credentials") and the formal help-doc answer by retrieving with a generated hypothetical answer that matches the document's style. The cross-encoder then reads the query and each candidate *together* and promotes the genuinely most relevant one to the top — catching cases where the bi-encoder's separate embeddings ranked a near-miss too high. Stacking these two stages on top of hybrid retrieval is a strong, common production recipe, and crucially it is incremental: you can add HyDE or re-ranking to an existing naive pipeline one stage at a time and measure the gain from each before committing to the extra latency it costs.
+
+<PaperLink
+  title="Precise Zero-Shot Dense Retrieval without Relevance Labels (HyDE)"
+  authors="Gao, Ma, Lin, Callan"
+  year={2022}
+  venue="ACL"
+  url="https://arxiv.org/abs/2212.10496"
+/>
+
+<KeyTakeaways phase={4}>
+- Naive RAG fails on **recall** (relevant chunk not retrieved), **precision** (noisy chunks crowd the top-k), and **irrelevant context**; advanced techniques target each.
+- **Query rewriting** transforms a raw user question into better search queries, lifting recall.
+- **HyDE** generates a hypothetical answer and embeds *that* to retrieve, bridging the style gap between questions and answer documents.
+- **Multi-query retrieval** casts several paraphrased nets and unions results; **re-ranking** with a slow-but-accurate **cross-encoder** over a cheap bi-encoder shortlist is the highest-impact upgrade.
+- **Parent-child chunking** retrieves small but returns large for context; **contextual compression** trims retrieved chunks to only relevant sentences.
+- **Self-RAG** and **RAPTOR** make retrieval adaptive — deciding when to retrieve and building hierarchical summaries.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Why does HyDE work better than embedding the raw query directly?",
+    options: ["It uses a bigger embedder", "A generated hypothetical answer matches the style and vocabulary of real answer documents, so its embedding lands closer to them than the question's does", "It removes retrieval", "It only uses keywords"],
+    correctIndex: 1,
+    explanation: "Questions and answers are phrased differently, so a question's embedding may be far from the answer document's. A hypothetical answer looks like a real document, bridging that style gap for better retrieval."
+  },
+  {
+    question: "What is the two-stage retrieve-then-rerank pattern?",
+    options: ["Retrieve twice with the same model", "Use a fast bi-encoder to get a large candidate set, then a slow accurate cross-encoder to re-rank the shortlist", "Re-embed the whole corpus per query", "Skip retrieval entirely"],
+    correctIndex: 1,
+    explanation: "A bi-encoder embeds query and docs separately (fast, coarse) to fetch a candidate set; a cross-encoder reads query and each candidate together (slow, accurate) to re-rank just those, combining speed over the corpus with precision on the shortlist."
+  },
+  {
+    question: "What problem does parent-child chunking solve?",
+    options: ["Slow embeddings", "The tension between precise retrieval (small chunks) and sufficient context (large chunks) — retrieve small, return the larger parent", "Access control", "Tokenization errors"],
+    correctIndex: 1,
+    explanation: "Small chunks retrieve precisely but lack context; large chunks have context but retrieve imprecisely. Parent-child indexing matches on small chunks but passes their larger parent chunk to the model for full context."
+  }
+]} />
+
+## What's Next
+
+You can build sophisticated RAG, but how do you know if it is actually good? In **LLM Evaluation — RAGAS, BLEU & Benchmarks**, we study how to measure LLM and RAG quality rigorously — from classic metrics to LLM-as-judge and the RAGAS framework for faithfulness and relevance.

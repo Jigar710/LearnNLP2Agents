@@ -1,0 +1,184 @@
+---
+title: "Advanced Prompting — Self-Consistency, ToT & ReAct"
+subtitle: "Going beyond simple prompting to multi-step reasoning"
+phase: 4
+topicNumber: 32
+slug: "advanced-prompting"
+readingTime: 15
+prerequisites: ["prompt-engineering"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('advanced-prompting');
+
+<TopicHero topic={topic} />
+
+Chain-of-Thought taught a model to reason in a single pass. But a single pass commits to one line of reasoning, and if that line goes wrong early, the answer is doomed. Advanced prompting techniques fix this by adding *structure* around the model: sampling many reasoning paths and voting, searching over a tree of possible thoughts, or interleaving reasoning with actions in the real world. These methods trade extra compute for substantially better reliability on hard problems, and one of them — ReAct — is the direct foundation of the AI agents you will build in Phase 5.
+
+This topic covers self-consistency, Tree of Thoughts, ReAct, and a few related techniques (least-to-most, program of thoughts, automatic prompt optimization). The thread connecting them is that *how you orchestrate multiple model calls* can matter as much as what each individual prompt says.
+
+## Self-Consistency: sample and vote
+
+The simplest upgrade to Chain-of-Thought is **self-consistency**. Instead of generating one reasoning path, sample *several* (with a nonzero temperature so they differ), then take a majority vote over the final answers. The insight is that a hard problem has many wrong answers but usually one right one, so different reasoning paths that arrive at the *same* answer reinforce each other, while scattered wrong answers cancel out. Self-consistency reliably boosts accuracy on math and logic benchmarks for the cost of running the model N times. It is a beautifully simple idea: reasoning is noisy, so average over the noise. The number of samples is a tunable dial — more samples give more reliability but cost proportionally more, and the benefit saturates once the correct answer reliably wins the vote, so a handful of samples often captures most of the gain.
+
+## Tree of Thoughts: search over reasoning
+
+**Tree of Thoughts (ToT)** generalizes further. Rather than sampling complete linear chains, ToT explores a *tree* of intermediate "thoughts": at each step the model proposes several possible next thoughts, each is evaluated, and a search procedure decides which branches to expand. This lets the model **backtrack** — abandon a dead-end line of reasoning and try another — which a linear chain cannot do. ToT can use **breadth-first search** (expand all promising branches a level at a time) or **depth-first search** (follow one branch deep, backtracking on failure). On problems that need exploration and planning, like the Game of 24 or creative writing with constraints, ToT substantially outperforms plain CoT.
+
+<Callout type="tip">
+The progression is: CoT is one path, self-consistency is many independent paths with a vote, and Tree of Thoughts is a searched tree with branching and backtracking. Each adds structure — and compute — for harder problems.
+</Callout>
+
+## ReAct: reason and act
+
+**ReAct** (Reason + Act) interleaves reasoning with *actions* that interact with the world — searching the web, running code, querying a database. The model alternates between **Thought** (reason about what to do), **Action** (call a tool), and **Observation** (read the tool's result), looping until it can answer. This is transformative because it lets the model gather information it does not have and ground its reasoning in real results rather than its (possibly outdated or hallucinated) internal knowledge. ReAct is the pattern that turns a language model into an *agent*, and we devote Topic 40 entirely to it.
+
+The format is a simple loop: `Thought: I need to find X. Action: search("X"). Observation: [result]. Thought: now I know X, so... Action: ...` The reasoning informs which action to take, and each observation informs the next reasoning step. It is Chain-of-Thought with the ability to *act* between thoughts, and that single addition — the power to observe the real world between reasoning steps — is what separates a closed-box reasoner from an open-ended agent that can look things up, run code, and correct course based on what it finds.
+
+## Least-to-Most and Program of Thoughts
+
+Two more techniques are worth knowing. **Least-to-Most** prompting decomposes a complex problem into a sequence of simpler subproblems, solves them in order (each building on the last), and combines the results — useful when a problem is too hard to solve in one go but decomposes cleanly. **Program of Thoughts (PoT)** has the model express its reasoning as *code* rather than prose, then executes the code to get the answer; this offloads exact computation (arithmetic, data manipulation) to a reliable interpreter instead of the model's error-prone mental math. PoT is especially strong for problems with a heavy computational component.
+
+## Automatic prompt optimization
+
+Writing prompts by hand is laborious, and a research thread aims to *automate* it. **Automatic Prompt Optimization (APO)** and frameworks like **DSPy** treat prompts as parameters to be optimized: you specify the task and a metric, and the framework searches over prompt variants (and few-shot example selections) to maximize the metric, much like hyperparameter tuning. DSPy goes further, compiling high-level program specifications into optimized prompts and pipelines. These tools are early but point toward a future where prompts are generated and tuned automatically rather than hand-crafted.
+
+<ComparisonTable
+  phase={4}
+  headers={["Technique", "Structure", "Best for", "Relative cost"]}
+  rows={[
+    ["Chain-of-Thought", "One reasoning path", "General reasoning", "1x"],
+    ["Self-Consistency", "N paths + majority vote", "Math, logic (noisy reasoning)", "Nx"],
+    ["Tree of Thoughts", "Searched tree, backtracking", "Planning, exploration puzzles", "High"],
+    ["ReAct", "Thought-Action-Observation loop", "Tasks needing tools/external info", "Variable"],
+    ["Program of Thoughts", "Reason as executable code", "Heavy computation/data tasks", "1x + execution"],
+  ]}
+  caption="Advanced prompting techniques add orchestration around the model."
+/>
+
+## When to use which
+
+A practical guide. Start with **CoT**; it is cheap and often enough. Add **self-consistency** when a reasoning task is important and you can afford N calls. Reach for **Tree of Thoughts** only for genuinely search-like problems where backtracking matters — it is expensive. Use **ReAct** whenever the task needs information or actions outside the model. Use **Program of Thoughts** when exact computation is the bottleneck. And remember: the strongest modern reasoning models do much of this internally, so test whether the added orchestration actually beats a clean prompt to a capable model before building complex scaffolding.
+
+## Why orchestration works: spending compute at inference
+
+There is a unifying principle behind all these techniques worth stating plainly: they trade **inference-time compute** for **accuracy**. A single forward pass spends a fixed amount of computation per token; self-consistency spends N times that, Tree of Thoughts spends even more searching branches, and ReAct spends a variable amount looping until done. In every case you are giving the model more "thinking" — more samples, more search, more steps — and reliably buying better answers on hard problems.
+
+This mirrors a deep idea that has reshaped the field: just as *training*-time compute follows scaling laws (Topic 24), *inference*-time compute has its own scaling behaviour, where letting a model deliberate longer improves results. The most capable recent models internalize this, spending variable internal computation before answering rather than requiring you to orchestrate it externally. But the principle is the same whether the extra computation happens inside the model or in a loop you write around it: hard problems benefit from more deliberation. Understanding advanced prompting as "how to make the model think harder" — rather than as a grab-bag of tricks — tells you when to use it (when a problem is hard enough to justify the extra compute) and when to skip it (when a single pass already succeeds). It also explains why these techniques help less on easy tasks: there is no benefit to deliberating over a question you can answer immediately.
+
+## Reflection and self-critique
+
+A powerful family of techniques not yet mentioned is **reflection**: having the model critique and revise its own output. The pattern is to generate an answer, then prompt the model to review that answer for errors, and finally produce an improved version informed by the critique. Variants like Reflexion add a memory of past mistakes so the model learns across attempts within a session. Self-critique works because spotting an error is often easier than avoiding it in the first place — a model that confidently produced a flawed answer can frequently find the flaw when explicitly asked to look.
+
+Reflection composes naturally with the other techniques. You can reflect on a chain-of-thought to catch a slip, use reflection as the evaluation step inside Tree of Thoughts, or have a ReAct agent critique whether its gathered evidence actually answers the question before responding. The caution is that reflection is not magic: a model that lacks the knowledge to answer correctly will not necessarily gain it by reflecting, and naive self-critique can sometimes talk the model *out* of a correct answer. As with every technique here, reflection should be validated against an evaluation set rather than assumed to help. But when it works — and on many reasoning and coding tasks it does — it is a cheap way to catch the kind of careless error that a single pass tends to make.
+
+## The orchestration tax: cost and latency
+
+Every technique in this topic has a cost, and ignoring it leads to systems that are accurate in a demo but unaffordable in production. Self-consistency multiplies your token bill and latency by N. Tree of Thoughts can issue dozens of model calls for a single answer. ReAct's loop runs an unpredictable number of turns, each a full model call plus a tool call. For a high-volume application, these multipliers can turn a viable product into a money-loser or make responses unacceptably slow.
+
+The discipline, then, is to apply orchestration *selectively*. Route easy requests to a single cheap call and reserve the expensive multi-call techniques for the hard cases that need them — a pattern that recurs as model routing in Topic 48. Measure not just accuracy but cost-per-task and latency, and ask whether the accuracy gain justifies the multiplier for *your* use case and *your* traffic. Often a clean prompt to a more capable model beats elaborate orchestration around a weaker one, at lower total cost — which is why the recurring advice to default to the strongest model and a simple prompt is not just about quality but about economics. Advanced prompting is a toolkit for the genuinely hard problems; using it indiscriminately is a common and expensive mistake.
+
+## Code Example
+
+The code implements self-consistency (sample multiple CoT answers and vote) and sketches a minimal ReAct loop, both against a current Claude model.
+
+<CodeBlock lang="python" filename="advanced_prompting.py" code={`# advanced_prompting.py
+# pip install anthropic
+import os, re
+from collections import Counter
+from anthropic import Anthropic
+
+client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+MODEL = "claude-opus-4-8"
+
+def cot(problem, temperature):
+    msg = client.messages.create(
+        model=MODEL, max_tokens=400, temperature=temperature,
+        messages=[{"role": "user",
+                   "content": problem + " Reason step by step, then end with 'Answer: <number>'."}],
+    )
+    return msg.content[0].text
+
+# --- Self-consistency: sample N paths, majority-vote the final answer ---
+problem = "A train travels 60 km in 1.5 hours. At that speed, how far in 4 hours?"
+answers = []
+for _ in range(5):
+    text = cot(problem, temperature=0.8)
+    m = re.search(r"Answer:\\s*([\\d.]+)", text)
+    if m:
+        answers.append(m.group(1))
+vote = Counter(answers).most_common(1)[0][0] if answers else None
+print("sampled answers:", answers)
+print("self-consistency answer:", vote)   # expected: 160
+
+# --- Minimal ReAct loop with a calculator tool ---
+def calculator(expr):
+    return str(eval(expr, {"__builtins__": {}}))   # sandboxed eval (demo only)
+
+react_system = (
+    "Solve the task using this loop:\\n"
+    "Thought: reason about the next step\\n"
+    "Action: calculator[<python expression>]\\n"
+    "Then wait for an Observation. When done, write 'Final: <answer>'."
+)
+# (In a real agent you parse Action, run the tool, append Observation,
+#  and feed it back; Topic 40 builds this fully. Here, one illustrative turn:)
+msg = client.messages.create(
+    model=MODEL, max_tokens=300, system=react_system,
+    messages=[{"role": "user", "content": "What is 17% of 250, plus 12?"}],
+)
+print("\\nReAct turn:\\n", msg.content[0].text)
+# The model emits a Thought and an Action like calculator[250*0.17 + 12].
+
+# Expected:
+# sampled answers: ['160', '160', '160', '160', '160']
+# self-consistency answer: 160
+# ReAct turn: Thought: ... Action: calculator[250*0.17 + 12] ...
+`} />
+
+Self-consistency turns five noisy reasoning attempts into one robust answer by voting — notice how even if one path slipped, the majority carries it. The ReAct snippet shows the Thought-Action skeleton; a full agent (Topic 40) parses the action, runs the tool, feeds the observation back, and loops. These orchestration patterns are the bridge from prompting a model to building systems *around* it, which is the rest of Phase 4 and all of Phase 5.
+
+<KeyTakeaways phase={4}>
+- **Self-consistency** samples multiple CoT paths and majority-votes the answer — different correct paths agree while wrong ones scatter, boosting reliability for N× the cost.
+- **Tree of Thoughts** searches a tree of intermediate thoughts with branching and **backtracking** (BFS or DFS), excelling at planning and exploration puzzles.
+- **ReAct** interleaves **Thought → Action → Observation**, letting the model use tools and external information — the foundation of agents (Phase 5).
+- **Least-to-Most** decomposes hard problems into ordered subproblems; **Program of Thoughts** writes reasoning as executable code to offload exact computation.
+- **Automatic prompt optimization** (APO, DSPy) treats prompts as parameters to be tuned automatically.
+- Add orchestration *only when it beats* a clean prompt to a capable model — modern reasoning models do much of this internally.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What is the key idea behind self-consistency?",
+    options: ["Use the longest reasoning path", "Sample multiple reasoning paths and take a majority vote over the final answers", "Always use temperature 0", "Remove chain-of-thought"],
+    correctIndex: 1,
+    explanation: "Self-consistency samples several diverse CoT paths and votes. Correct paths tend to converge on the same answer while wrong ones scatter, so the majority answer is more reliable."
+  },
+  {
+    question: "What is the key difference between CoT and ReAct?",
+    options: ["ReAct is shorter", "ReAct interleaves reasoning with actions (tool use) and observations, while CoT only reasons internally", "CoT uses tools", "They are identical"],
+    correctIndex: 1,
+    explanation: "CoT reasons purely in text. ReAct adds Action and Observation steps, letting the model call tools and ground its reasoning in real external results — the basis for agents."
+  },
+  {
+    question: "When is Tree of Thoughts most worth its high cost?",
+    options: ["For simple lookups", "For problems that need exploration and backtracking, like puzzles and planning", "For translation", "For any task at all"],
+    correctIndex: 1,
+    explanation: "ToT's branching search with backtracking pays off on problems where you must explore alternatives and abandon dead ends. For straightforward tasks, it is wasteful overkill."
+  }
+]} />
+
+## What's Next
+
+ReAct lets a model fetch external information, which raises a foundational question: how do we give an LLM access to a specific body of knowledge — your documents, your data — at inference time? In **Introduction to RAG**, we build the retrieval-augmented generation pattern that grounds LLMs in external knowledge.

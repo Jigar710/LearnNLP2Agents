@@ -1,0 +1,199 @@
+---
+title: "Tokenization — BPE, WordPiece & SentencePiece"
+subtitle: "The unsung hero — how text becomes tokens for modern LLMs"
+phase: 2
+topicNumber: 18
+slug: "tokenization-bpe"
+readingTime: 16
+prerequisites: ["corpus-tokens-vocabulary"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('tokenization-bpe');
+
+<TopicHero topic={topic} />
+
+Tokenization is the least glamorous and most underestimated part of a language model. Before a Transformer can embed a single word, something must decide *what counts as a token*. Get this wrong and the model wastes capacity, fumbles rare words, and bloats its vocabulary; get it right and the model gracefully handles typos, new words, code, and dozens of languages. Modern large language models owe much of their robustness to **subword tokenization**, and this topic opens up the algorithms — Byte-Pair Encoding, WordPiece, and the Unigram model behind SentencePiece — that make it work.
+
+We saw in Topic 3 that word-level vocabularies suffer the out-of-vocabulary problem and that character-level sequences are inefficient. Subword tokenization is the resolution of that tension. You will learn the BPE merge algorithm step by step, see how WordPiece and Unigram differ, understand byte-level BPE and special tokens, and implement BPE from scratch before comparing real tokenizers from GPT-4 and BERT.
+
+## Why word-level tokenization fails
+
+Splitting on whitespace seems natural, but it breaks in three ways. First, **out-of-vocabulary words**: any word not seen in training — a new product name, a typo, a rare technical term — must collapse to a single `<UNK>` token, discarding its meaning. Second, **vocabulary explosion**: to cover a language reasonably you need hundreds of thousands of word types, and morphologically rich languages (Finnish, Turkish) make this far worse, since each stem spawns dozens of inflected forms. Third, **no sharing of structure**: "run", "runs", "running", and "runner" become four unrelated tokens, even though they share an obvious root. Word-level tokenization is wasteful and brittle.
+
+## Why character-level is inefficient
+
+The opposite extreme — one token per character — eliminates the OOV problem (every word can be spelled out) and keeps the vocabulary tiny. But it makes sequences very long: a 10-word sentence becomes 50-plus characters, and since attention cost grows with the square of sequence length, this is expensive. Worse, the model must learn to assemble meaning from individual letters, spending capacity rediscovering that "c-a-t" is a unit. Character-level works, but it is inefficient in both compute and learning.
+
+## Subword tokenization: the sweet spot
+
+Subword tokenization splits the difference brilliantly: keep frequent words whole, break rare words into meaningful pieces. "tokenization" might become `token` + `ization`; an unseen word like "antidisestablishmentarianism" gets spelled from familiar fragments. This gives a manageable vocabulary (tens of thousands of tokens), no out-of-vocabulary problem (anything can be built from pieces, down to single characters or bytes), and shared structure (the `run` piece appears in "run", "running", "runner"). Every modern large language model uses some flavour of subword tokenization.
+
+## Byte-Pair Encoding, step by step
+
+**Byte-Pair Encoding (BPE)** was originally a compression algorithm, repurposed for tokenization. It learns a vocabulary by *merging* frequent adjacent pairs. The training procedure:
+
+1. Start with a base vocabulary of individual characters, and represent every word as a sequence of those characters (often with a special end-of-word marker).
+2. Count the frequency of every adjacent symbol pair across the corpus.
+3. Merge the *most frequent* pair into a single new symbol, and add it to the vocabulary.
+4. Repeat steps 2-3 for a fixed number of merges (the merges determine the final vocabulary size).
+
+To tokenize new text, you apply the learned merges in the order they were learned. The beauty is that frequent words quickly become single tokens (because their character pairs merge early), while rare words remain as a few subword pieces.
+
+## A worked BPE example
+
+Consider a tiny corpus with the words "low", "lower", "newest", "widest". Represented as characters, the most frequent adjacent pair might be `e` + `s` (appearing in "newest" and "widest"), so BPE merges them into `es`. Next, `es` + `t` might be most frequent, merging into `est`. After a few merges, "newest" tokenizes as `new` + `est` and "widest" as `wid` + `est`, sharing the `est` token — exactly the kind of structure we want. The merge rules are learned once and then applied deterministically.
+
+<Callout type="tip">
+BPE's merges are frequency-driven and order-dependent. The same text tokenized by two BPE tokenizers trained on different corpora can produce different splits, which is why you must always use a model with *its own* tokenizer.
+</Callout>
+
+## WordPiece and Unigram
+
+Two important relatives change the merge criterion.
+
+**WordPiece** (used by BERT) is like BPE but instead of merging the most *frequent* pair, it merges the pair that most increases the *likelihood* of the training data under a language model. In practice this often yields similar vocabularies, with BERT marking word-internal pieces with a `##` prefix (so "playing" becomes `play` + `##ing`).
+
+**Unigram language model** (the default in SentencePiece) works in the opposite direction. It starts with a large candidate vocabulary and *prunes* tokens, keeping the set that best explains the corpus under a probabilistic model, where each word's segmentation is chosen to maximize likelihood. Unigram can represent multiple possible segmentations of a word and pick the most probable, which is useful for languages without clear word boundaries.
+
+## Byte-level BPE and special tokens
+
+**Byte-level BPE** (GPT-2, GPT-4, and the `tiktoken` library) runs BPE not on characters but on raw **bytes**. Since there are only 256 possible bytes, the base vocabulary is tiny and *truly* universal — any text in any language or script, plus emoji and binary, can be represented without ever needing an unknown token. This is why GPT models handle arbitrary Unicode and code seamlessly.
+
+Tokenizers also reserve **special tokens** for structural roles: `[CLS]` and `[SEP]` for BERT's classification and sentence-separation, `[PAD]` for padding, `[MASK]` for masked-language-model training, and `<|endoftext|>` for GPT's document boundaries. These are added to the vocabulary and given dedicated embeddings.
+
+<ComparisonTable
+  phase={2}
+  headers={["Method", "Merge / selection rule", "Base units", "Used by"]}
+  rows={[
+    ["BPE", "Merge most <em>frequent</em> adjacent pair", "Characters", "GPT-2 (orig.), RoBERTa"],
+    ["WordPiece", "Merge pair that most raises data <em>likelihood</em>", "Characters (<code>##</code> marks)", "BERT, DistilBERT"],
+    ["Unigram", "Prune to vocab maximizing <em>likelihood</em>", "Characters / pieces", "T5, ALBERT (SentencePiece)"],
+    ["Byte-level BPE", "BPE over raw <em>bytes</em>", "256 bytes", "GPT-2/3/4, tiktoken"],
+  ]}
+  caption="Four subword schemes and how they choose their vocabulary."
+/>
+
+## Vocabulary size choices
+
+Different models pick different vocabulary sizes, balancing sequence length against model size (Topic 3): BERT uses about 30,000 WordPiece tokens, LLaMA around 32,000, and GPT-4's `cl100k` tokenizer about 100,000. Bigger vocabularies mean shorter sequences (fewer tokens per word) but larger embedding and output layers. Multilingual models lean toward larger vocabularies to fairly cover many scripts.
+
+## How tokenization shapes model behaviour
+
+Tokenization is not a neutral preprocessing step — it leaves fingerprints all over a model's behaviour. Because the model only ever sees tokens, anything the tokenizer obscures becomes hard for the model. A classic example is arithmetic and character-level tasks: if "1234" is a single token but "1235" splits into two, the model has an inconsistent view of numbers, which is part of why language models historically struggled with digit manipulation and spelling. Counting the letters in a word is hard for a model that never sees letters, only subword chunks.
+
+Tokenization also affects fairness and efficiency across languages. Tokenizers trained mostly on English produce far fewer tokens per sentence for English than for, say, Hindi or Thai, where the same meaning may take three or four times as many tokens. Since models are billed and length-limited by tokens, speakers of under-represented languages pay more and hit context limits sooner — a real equity issue baked into the tokenizer. Understanding this helps you diagnose puzzling behaviour: when a model mangles a rare name or miscounts characters, the tokenizer is often the culprit, not the Transformer on top of it.
+
+## The cost of tokens
+
+Tokens are the unit of account for modern language models, so their economics matter. API pricing is per token, context windows are measured in tokens, and inference latency scales with the number of tokens generated. This makes the tokenizer's *efficiency* — how few tokens it needs to express a given text — a direct cost lever. A tokenizer that encodes English at roughly four characters per token will turn a 1,000-word document into about 1,300 tokens; a less efficient one might need 2,000, inflating cost and latency by half.
+
+This is why vocabulary size and tokenizer quality are taken seriously in model design. A larger, well-trained vocabulary packs more characters into each token, shortening sequences — though, as Topic 3 noted, with diminishing returns and a larger embedding table. The trade-off is real and quantitative, and when you choose between models for a production system, comparing how many tokens each tokenizer needs for *your* kind of text (English prose, source code, a specific language) is a concrete, often overlooked, part of the decision.
+
+## Common tokenization pitfalls
+
+A few practical hazards trip up almost everyone. **Leading spaces** matter in byte-level BPE: the token for " cat" (with a space) differs from "cat", so concatenating strings carelessly can change tokenization and confuse the model. **Trailing whitespace** in a prompt can leave the model "mid-token" and degrade output. **Token boundaries** rarely align with what a human considers a word, so naive string operations on model output — splitting on spaces, counting words — can disagree with the model's own view. And **special tokens** must be handled deliberately: accidentally letting user text contain a literal `<|endoftext|>` string can let an attacker prematurely end a document or inject structure, a genuine security consideration. None of these are exotic; they are the daily friction of working with tokenizers, and knowing they exist saves hours of baffled debugging when a model behaves strangely for reasons that have nothing to do with the model at all.
+
+## Detokenization: putting the pieces back
+
+Generation runs in reverse: the model emits token ids, and a **detokenizer** stitches them back into a string. This is trickier than it sounds. WordPiece must drop the `##` continuation marks and rejoin pieces without spaces, so `play` + `##ing` becomes "playing", while genuinely separate words keep their spaces. Byte-level BPE encodes spaces *into* the tokens (the leading-space convention), so detokenization is mostly concatenation followed by a byte-to-text decode that correctly reassembles multi-byte Unicode characters and emoji from their byte-level pieces.
+
+Reversibility is a design goal of good tokenizers: encode then decode should return the original text exactly, including whitespace and punctuation. SentencePiece was explicitly built to be fully reversible by treating the raw input — spaces included — as just another sequence of characters, using a visible marker for spaces so nothing is lost. When you build applications, this round-trip property is what lets you reliably map model output back to displayable text, and lapses in it are a frequent source of subtle rendering bugs where spaces vanish or characters get mangled. The tokenizer is a two-way bridge, and both directions have to be correct.
+
+## Code Example
+
+The code implements the core BPE merge loop from scratch on a toy corpus, then uses the HuggingFace `tokenizers`/`transformers` ecosystem to compare how GPT-style and BERT-style tokenizers split the same text.
+
+<CodeBlock lang="python" filename="bpe_tokenizer.py" code={`# bpe_tokenizer.py
+# pip install transformers
+from collections import Counter
+
+# --- BPE merge loop from scratch ---
+corpus = {"low": 5, "lower": 2, "newest": 6, "widest": 3}
+# represent each word as space-separated chars + end marker
+words = {" ".join(list(w)) + " </w>": c for w, c in corpus.items()}
+
+def best_pair(words):
+    pairs = Counter()
+    for word, freq in words.items():
+        syms = word.split()
+        for a, b in zip(syms, syms[1:]):
+            pairs[(a, b)] += freq
+    return pairs.most_common(1)[0][0]
+
+def merge(words, pair):
+    bigram = " ".join(pair)
+    new = "".join(pair)
+    return {w.replace(bigram, new): c for w, c in words.items()}
+
+print("BPE merges learned:")
+for step in range(5):
+    pair = best_pair(words)
+    words = merge(words, pair)
+    print(f"  {step+1}. merge {pair}")
+
+# --- Compare real tokenizers on the same text ---
+from transformers import AutoTokenizer
+text = "Tokenization isn't trivial: subwords help! 🤖"
+for name in ["bert-base-uncased", "gpt2"]:
+    tok = AutoTokenizer.from_pretrained(name)
+    pieces = tok.tokenize(text)
+    print(f"\\n{name}: {len(pieces)} tokens")
+    print(" ", pieces)
+
+# Expected (abridged):
+# BPE merges learned:
+#   1. merge ('e', 's')
+#   2. merge ('es', 't')
+#   3. merge ('est', '</w>')
+#   ...
+# bert-base-uncased: ~12 tokens  ['token', '##ization', 'isn', "'", 't', ...]
+# gpt2: ~13 tokens  ['Token', 'ization', ' isn', "'t", ' trivial', ...]
+`} />
+
+Two things stand out. The from-scratch loop merges `e`+`s`, then `es`+`t`, learning the shared `est` piece exactly as predicted. And the real tokenizers split the same sentence differently: BERT's WordPiece uses `##` continuation marks and a separate `'` token, while GPT-2's byte-level BPE keeps leading spaces attached (` isn`) and handles the emoji as bytes without choking. There is no single "right" tokenization — only the one a given model was trained with, which is why you must always pair a model with its own tokenizer.
+
+<KeyTakeaways phase={2}>
+- **Word-level** tokenization suffers OOV and vocabulary explosion; **character-level** is robust but inefficient (long sequences). Subword tokenization is the sweet spot.
+- **BPE** learns a vocabulary by repeatedly merging the most *frequent* adjacent pair; tokenization applies the learned merges in order.
+- **WordPiece** (BERT) merges by *likelihood* gain and marks continuations with `##`; **Unigram** (SentencePiece) prunes a large vocab to maximize corpus likelihood.
+- **Byte-level BPE** (GPT) runs over raw bytes, so any Unicode, emoji, or code is representable with no unknown token.
+- **Special tokens** (`[CLS]`, `[SEP]`, `[MASK]`, `[PAD]`, `<|endoftext|>`) encode structure; **vocabulary sizes** range ~30k (BERT) to ~100k (GPT-4).
+- Always use a model with **its own tokenizer** — merges and vocabularies are model-specific.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "How does BPE decide which pair to merge at each step?",
+    options: ["The rarest adjacent pair", "The most frequent adjacent pair", "A random pair", "The longest pair"],
+    correctIndex: 1,
+    explanation: "Byte-Pair Encoding repeatedly merges the most frequent adjacent symbol pair, so common sequences quickly become single tokens while rare words stay as pieces."
+  },
+  {
+    question: "Why does BPE help with morphologically rich languages?",
+    options: ["It removes all suffixes", "It splits words into shared subword pieces, so related forms reuse the same tokens instead of exploding the vocabulary", "It translates them to English first", "It uses a larger word vocabulary"],
+    correctIndex: 1,
+    explanation: "Rich morphology creates huge numbers of word forms. Subword tokenization represents them as combinations of shared pieces (stems, suffixes), keeping the vocabulary small and sharing structure across forms."
+  },
+  {
+    question: "What is the main advantage of byte-level BPE (as in GPT models)?",
+    options: ["It is the fastest tokenizer", "Working over 256 bytes, it can represent any Unicode text, emoji, or code with no unknown token", "It produces the shortest sequences", "It needs no training"],
+    correctIndex: 1,
+    explanation: "Because every possible byte is in the base vocabulary, byte-level BPE can encode arbitrary text — any language, emoji, or binary — without ever emitting an <UNK> token."
+  }
+]} />
+
+## What's Next
+
+With tokenization understood, we can finally study the two model families that defined modern NLP. In **BERT — Bidirectional Pre-training**, we see how an encoder-only Transformer, pre-trained to fill in masked words, learns deep bidirectional representations that transfer to nearly every understanding task.

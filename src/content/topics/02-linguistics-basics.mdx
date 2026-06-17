@@ -1,0 +1,207 @@
+---
+title: "Linguistics Basics — POS, NER & Parsing"
+subtitle: "The linguistic building blocks every NLP engineer should know"
+phase: 1
+topicNumber: 2
+slug: "linguistics-basics"
+readingTime: 13
+prerequisites: ["intro-to-nlp"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('linguistics-basics');
+
+<TopicHero topic={topic} />
+
+Before deep learning swallowed the field, NLP engineers spent most of their time on *linguistic structure*: tagging words with their grammatical roles, finding the names of people and places, and drawing the syntactic skeleton of a sentence. Even though today's large language models learn much of this implicitly, the concepts have not gone away. They remain the vocabulary we use to describe what a model is doing, the labels in countless datasets, and the backbone of production systems for search, extraction, and analytics.
+
+In this topic you will learn the core linguistic annotations every NLP practitioner should recognize: **parts of speech**, **named entities**, **constituency and dependency parses**, **coreference**, and **semantic roles**. We will keep the focus practical — what each annotation *is*, why it matters downstream, and how to produce it in a few lines of Python — rather than diving into formal linguistic theory.
+
+## Parts of Speech (POS)
+
+A part-of-speech tag labels each word with its grammatical category: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, and so on. POS tagging is one of the oldest NLP tasks, and it is foundational because grammatical category constrains meaning and structure.
+
+Modern systems use the **Universal POS tagset** (a small, language-agnostic set: `NOUN`, `VERB`, `ADJ`, `ADV`, `PRON`, `DET`, `ADP`, `NUM`, `PROPN`, `PUNCT`, ...) and/or finer-grained tagsets like the Penn Treebank tags (`NN`, `NNS`, `VBD`, `VBZ`, `JJ`, ...), which distinguish singular versus plural nouns, verb tenses, and more.
+
+The reason POS tagging is non-trivial is — again — ambiguity. The word "book" is a noun in "I read a book" but a verb in "book a flight." The word "back" can be a noun, verb, adjective, or adverb depending on context. A good tagger uses the surrounding words to disambiguate, which is why sequence models (and later, Transformers) do so well at it.
+
+<Callout type="tip">
+POS tags are *contextual*. The same word gets different tags in different sentences. Whenever you see a tagger output, remember it considered the neighbours, not just the word in isolation.
+</Callout>
+
+## Named Entity Recognition (NER)
+
+Named Entity Recognition finds and classifies the *named things* in text: people (`PERSON`), organizations (`ORG`), locations (`GPE`/`LOC`), dates (`DATE`), monetary amounts (`MONEY`), and more. NER is the workhorse of information extraction — it is how you turn "Apple acquired the London startup for $50M in 2023" into structured fields you can store in a database.
+
+Because entities can span multiple tokens ("New York City" is one entity, three tokens), NER is usually framed as a *token-labelling* problem using the **IOB scheme** (also called BIO):
+
+- `B-TYPE` marks the **B**eginning token of an entity of a given type.
+- `I-TYPE` marks a token **I**nside (continuing) that entity.
+- `O` marks a token **O**utside any entity.
+
+So "New York City is big" becomes `New/B-GPE York/I-GPE City/I-GPE is/O big/O`. This tagging scheme lets a sequence model output one label per token while still representing multi-token spans unambiguously. Variants like IOBES add explicit **E**nd and **S**ingle tags for sharper boundaries.
+
+<Callout type="warning" title="Boundary errors are the hard part">
+Most NER mistakes are not about the *type* of an entity but about its *boundaries* — where it starts and ends. Tagging "York" as `O` when it should be `I-GPE` breaks "New York City" into pieces. When you evaluate an NER system, score whole spans, not individual tokens.
+</Callout>
+
+## Constituency vs Dependency Parsing
+
+Parsing recovers the syntactic structure of a sentence. There are two dominant formalisms, and they answer different questions.
+
+**Constituency parsing** breaks a sentence into nested *phrases* (constituents): noun phrases (NP), verb phrases (VP), prepositional phrases (PP), and so on, arranged in a tree whose leaves are words. It answers "which words group together into units?" The sentence "The cat sat on the mat" has an NP ("the cat") and a VP ("sat on the mat") that itself contains a PP ("on the mat").
+
+**Dependency parsing** instead draws labelled, directed arcs between *words*, where each arc connects a head to a dependent. It answers "which word governs which?" In "The cat sat on the mat", `sat` is the root; `cat` is its subject (`nsubj`); `on` attaches to `sat`; and `mat` is the object of the preposition (`pobj`). Dependency trees are flatter, language-agnostic, and especially convenient for extracting relations ("who did what to whom").
+
+<ComparisonTable
+  phase={1}
+  headers={["Aspect", "Constituency Parsing", "Dependency Parsing"]}
+  rows={[
+    ["Unit of structure", "Nested phrases (NP, VP, PP)", "Word-to-word relations"],
+    ["Output shape", "Tree with phrase nodes + word leaves", "Tree of labelled arcs between words"],
+    ["Core question", "Which words form a unit?", "Which word governs which?"],
+    ["Best for", "Grammar, syntax research, generation", "Relation/info extraction, many languages"],
+    ["Typical label", "<code>NP</code>, <code>VP</code>, <code>S</code>", "<code>nsubj</code>, <code>dobj</code>, <code>amod</code>"],
+  ]}
+  caption="Two complementary views of syntactic structure."
+/>
+
+Neither is "better" — they capture complementary information. Dependency parses tend to be more popular in modern applied NLP because their word-to-word relations map cleanly onto extraction tasks and because the Universal Dependencies project provides consistent annotations across 100+ languages.
+
+## Coreference Resolution
+
+Coreference resolution figures out which expressions in a text refer to the *same* real-world entity. In "Maria dropped her phone because she was tired, and it cracked," coreference links `her` and `she` to `Maria`, and `it` to `phone`. Without coreference, a system reading a paragraph sees a stream of disconnected mentions; with it, the system can track entities across sentences — essential for summarization, question answering, and knowledge-base construction.
+
+Coreference is genuinely hard because it often requires world knowledge and reasoning (recall the Winograd "trophy / suitcase" example from Topic 1). It is one of the tasks where large language models, with their broad world knowledge, dramatically outperform earlier rule-based and statistical systems.
+
+## Semantic Role Labeling (SRL)
+
+Where parsing tells you the *grammatical* structure, Semantic Role Labeling tells you *who did what to whom, when, and where*. It identifies the predicate (usually a verb) and labels its arguments with semantic roles: the **agent** (doer), the **patient** (thing acted upon), the **instrument**, the **location**, the **time**, and so on.
+
+For "Maria gave John a book yesterday," SRL identifies `gave` as the predicate, `Maria` as the agent, `John` as the recipient, `a book` as the thing given, and `yesterday` as the temporal modifier. This shallow-semantic structure is a bridge between pure syntax and full meaning, and it is valuable for question answering and event extraction.
+
+## Why these matter for downstream tasks
+
+It is fair to ask: if large language models learn language implicitly, why study these annotations at all? Three reasons.
+
+First, **they are the labels in your data**. Vast numbers of datasets, benchmarks, and production pipelines are defined in terms of POS tags, entity types, and dependency relations. You cannot work with them without speaking the language.
+
+Second, **they make systems interpretable and controllable**. When a search system needs to find "documents where *Apple* the company (not the fruit) acquired something," explicit NER and relation extraction give you precise, debuggable behaviour that a black-box model does not.
+
+Third, **they sharpen your intuition**. Understanding that "book" can be a noun or verb, or that NER errors are usually boundary errors, makes you a better diagnostician when a model misbehaves. The concepts are a lens, not a relic.
+
+## How tagging and parsing actually work
+
+It is worth a moment to understand *how* these annotations are produced, because the progression mirrors the whole history of NLP.
+
+The earliest taggers were **rule-based**: linguists wrote patterns like "if a word ends in *-ly* and follows a verb, tag it adverb." These worked on clean text but were brittle and required enormous manual effort to maintain.
+
+The **statistical** generation framed tagging as a sequence-labelling problem and solved it with **Hidden Markov Models (HMMs)** and later **Conditional Random Fields (CRFs)**. The key insight was that the best tag for a word depends both on the word itself and on the tags of its neighbours. An HMM models the probability of a tag sequence as a product of transition probabilities (tag-to-tag) and emission probabilities (tag-to-word), then uses the Viterbi algorithm to find the most probable sequence. This jointly-optimal decoding is why statistical taggers leapt past rule-based ones.
+
+Today, **neural** taggers and parsers dominate. A bidirectional LSTM or a Transformer reads the whole sentence, builds a context-aware representation of each token, and predicts tags or dependency arcs from those representations. Because the representation already encodes context, neural models resolve ambiguity ("book" the noun versus verb) far more reliably. Dependency parsers come in two flavours: **transition-based** parsers build the tree with a sequence of shift/reduce actions, while **graph-based** parsers score every possible arc and find the best-scoring tree. You will meet the LSTM and Transformer building blocks later in this curriculum; for now, the point is that the same task — assign structure to a sentence — has been attacked with rules, then statistics, then learned representations.
+
+## Evaluating these systems
+
+You cannot improve what you cannot measure, so each annotation task has its own standard metrics.
+
+**POS tagging** is scored with plain **accuracy**: the percentage of tokens assigned the correct tag. Modern taggers exceed 97% on clean English newswire, which sounds excellent until you remember that a sentence of 20 words still has a meaningful chance of containing at least one error.
+
+**NER** is scored with **precision, recall, and F1** computed over *entire spans*, not individual tokens. A predicted entity counts as correct only if both its boundaries and its type match the gold annotation exactly. This span-level scoring is strict on purpose: getting "New" right but "New York City" wrong should not earn partial credit in most applications.
+
+**Dependency parsing** uses two metrics: **UAS (Unlabelled Attachment Score)**, the fraction of words attached to the correct head, and **LAS (Labelled Attachment Score)**, the stricter fraction attached to the correct head *with the correct relation label*. LAS is always less than or equal to UAS, and it is the number researchers report when comparing parsers.
+
+Knowing these metrics matters in practice: when a stakeholder says "the model is 95% accurate," your first question should be "accurate by which metric, and over tokens or spans?" The difference routinely separates a system that works from one that only looks like it does.
+
+## Beyond English: why morphology matters
+
+Everything so far used English examples, but the world's languages stress these tools in different ways, and the differences are instructive. English is *morphologically poor*: words change form only a little (cat/cats, walk/walked). Many languages are *morphologically rich*. Finnish and Turkish are agglutinative, gluing many suffixes onto a stem so that a single "word" can express what English needs a whole phrase for. Arabic and Hebrew build words from consonantal roots with vowel patterns. In such languages, a naive word-level tagger faces an explosion of distinct word forms, most seen only a handful of times.
+
+This is exactly why **lemmatization** (reducing a word to its dictionary form) and, later, **subword tokenization** become so important — they tame the combinatorial blow-up of word forms. It is also why Universal Dependencies deliberately standardizes annotations across languages: a relation like `nsubj` (nominal subject) means the same thing in Finnish, Hindi, and English, even though the surface words look nothing alike. When you build multilingual systems, you quickly learn that assumptions baked in from English — "words are separated by spaces," "morphology is negligible" — are the first things to break. Keeping the underlying linguistic relations language-agnostic is what lets one model generalize across scripts and grammars.
+
+## Code Example
+
+spaCy produces POS tags, named entities, and a dependency parse in a single pass. The example below prints all three for one sentence so you can see how the annotations line up.
+
+<CodeBlock lang="python" filename="linguistics_demo.py" code={`# linguistics_demo.py
+# pip install spacy && python -m spacy download en_core_web_sm
+import spacy
+
+nlp = spacy.load("en_core_web_sm")
+doc = nlp("Apple acquired the London startup for $50 million in 2023.")
+
+# --- POS tags ---
+print("POS TAGS")
+for tok in doc:
+    print(f"  {tok.text:<10} {tok.pos_:<6} {tok.tag_}")
+
+# --- Dependency relations (child -> head) ---
+print("\\nDEPENDENCIES")
+for tok in doc:
+    print(f"  {tok.text:<10} --{tok.dep_}--> {tok.head.text}")
+
+# --- Named entities with IOB-style spans ---
+print("\\nENTITIES")
+for ent in doc.ents:
+    print(f"  {ent.text:<14} {ent.label_}")
+
+# Expected (abridged):
+# POS TAGS
+#   Apple      PROPN  NNP
+#   acquired   VERB   VBD
+#   London     PROPN  NNP
+# DEPENDENCIES
+#   Apple      --nsubj--> acquired
+#   startup    --dobj--> acquired
+# ENTITIES
+#   Apple          ORG
+#   London         GPE
+#   $50 million    MONEY
+#   2023           DATE
+`} />
+
+Read the output as three views of one sentence: the POS column gives grammatical category, the dependency column shows `Apple` as the subject (`nsubj`) of `acquired` and `startup` as its direct object (`dobj`), and the entity list pulls out the structured facts. Chaining these gives you "ORG `Apple` acquired something for MONEY `$50 million`" — the raw material of an automated extraction pipeline.
+
+<KeyTakeaways phase={1}>
+- **POS tags label grammatical category** and are contextual — the same word can be tagged differently in different sentences.
+- **NER finds named entities** and is framed as token labelling with the **IOB/BIO** scheme; most errors are boundary errors, so score whole spans.
+- **Constituency parsing groups words into nested phrases; dependency parsing links words by head–dependent arcs.** They answer complementary questions.
+- **Coreference resolution** links mentions ("she", "it") to the entities they refer to, enabling cross-sentence understanding.
+- **Semantic Role Labeling** captures who did what to whom — a bridge between syntax and meaning.
+- These annotations remain the **labels, interpretability layer, and intuition** behind modern NLP, even when models learn them implicitly.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "In the IOB scheme, how is the entity 'New York City' tagged?",
+    options: ["B-GPE B-GPE B-GPE", "B-GPE I-GPE I-GPE", "I-GPE I-GPE I-GPE", "O O O"],
+    correctIndex: 1,
+    explanation: "The first token gets B-GPE (Beginning), and each continuing token gets I-GPE (Inside). So: New/B-GPE York/I-GPE City/I-GPE."
+  },
+  {
+    question: "What does a dependency parse primarily represent?",
+    options: ["Nested phrase constituents like NP and VP", "Head–dependent relations between individual words", "The sentiment of each word", "The part-of-speech of each token only"],
+    correctIndex: 1,
+    explanation: "Dependency parsing draws labelled directed arcs between words (e.g. nsubj, dobj), capturing which word governs which. Constituency parsing is the one that builds nested phrase structure."
+  },
+  {
+    question: "Why is 'book' a challenge for POS tagging?",
+    options: ["It is rare in English", "It can be a noun or a verb depending on context", "It has no valid POS tag", "It is always a proper noun"],
+    correctIndex: 1,
+    explanation: "'book' is lexically ambiguous: a noun in 'read a book', a verb in 'book a flight'. The tagger must use surrounding context to choose."
+  }
+]} />
+
+## What's Next
+
+With the linguistic vocabulary in hand, we move to the raw material itself. In **Corpus, Tokens & Vocabulary** you will learn how text collections are built, how tokenization carves text into units, and how word frequencies follow the striking regularity known as Zipf's Law — your first encounter with the mathematics of language.

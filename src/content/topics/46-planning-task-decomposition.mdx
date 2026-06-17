@@ -1,0 +1,177 @@
+---
+title: "Planning & Task Decomposition"
+subtitle: "Breaking big goals into executable sub-tasks for agents"
+phase: 5
+topicNumber: 46
+slug: "planning-task-decomposition"
+readingTime: 15
+prerequisites: ["langgraph"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('planning-task-decomposition');
+
+<TopicHero topic={topic} />
+
+A goal like "research this market and write a report" is too big to do in one step. Capable agents handle such goals by **planning** — breaking the big goal into a sequence of smaller, executable sub-tasks, then carrying them out. Planning is what lets agents tackle long-horizon work that a single Think-Act-Observe step cannot, and it is the difference between an agent that flails on a complex goal and one that methodically completes it. This topic covers the major planning approaches — plan-and-execute, least-to-most, decomposition — and the crucial ability to *re-plan* when steps fail.
+
+Planning sits alongside ReAct as a core agent capability. Where ReAct decides the next action step by step, planning thinks ahead about the *whole* sequence — and the best agents combine both, planning at a high level while ReAct-ing within each step.
+
+## Why planning?
+
+Complex tasks have structure: they consist of sub-goals that must be achieved, often in a particular order, sometimes with dependencies. Without planning, an agent attacks a big goal one reactive step at a time, easily losing the thread, repeating work, or missing necessary steps. Planning makes the structure explicit: decompose the goal into sub-tasks, decide their order, and execute them deliberately. This gives the agent a roadmap, makes progress trackable, and turns an overwhelming goal into a series of manageable steps. Planning is, in essence, how agents scale from short, single-shot tasks to genuinely long-horizon ones.
+
+## Task decomposition approaches
+
+Several approaches break a goal into steps:
+
+- **Least-to-Most**: decompose the problem into subproblems ordered from simplest to most complex, solve them in sequence (each building on the last), and combine — good when a hard problem decomposes cleanly into easier ones.
+- **Plan-and-Execute**: explicitly generate a full plan (a list of steps) first, then execute each step. The plan is made upfront and followed, separating "what to do" from "doing it."
+- **Chain-of-Thought planning**: use CoT reasoning to think through the steps needed for a multi-step goal, a lighter-weight form of planning embedded in the reasoning.
+
+These differ in how explicit and upfront the plan is, from CoT's implicit reasoning to plan-and-execute's explicit step list.
+
+## Plan-and-execute in depth
+
+The **plan-and-execute** pattern is the most structured. A *planner* (often a strong model) takes the goal and produces an explicit, ordered list of steps. An *executor* then carries out each step in turn, possibly using tools or even sub-agents, accumulating results. This separation has real benefits: the plan is inspectable (you can see and even edit it before execution), execution is trackable (you know which step you are on), and the planner can use its full reasoning on strategy while the executor focuses on doing. It contrasts with ReAct, which interleaves planning and acting step by step rather than planning the whole sequence upfront.
+
+<Callout type="tip">
+Plan-and-execute vs ReAct: ReAct decides the next action after each observation (adaptive, but can lose sight of the big picture); plan-and-execute commits to a full plan upfront (structured, trackable, but less adaptive). The strongest agents combine them — plan the high-level steps, then ReAct within each step, and re-plan when reality diverges.
+</Callout>
+
+## Notable planning agents: HuggingGPT and Voyager
+
+Two influential systems show planning in action. **HuggingGPT** used an LLM as a planner that, given a task, selected and orchestrated specialized models (from HuggingFace) to execute sub-tasks — the LLM plans, other models do the specialized work. **Voyager** (Wang et al. 2023) is a landmark: an LLM-powered agent that plays Minecraft, planning its own goals, writing code to achieve them, and — crucially — building a **skill library** of reusable procedures it can call later. Voyager demonstrated *lifelong learning*: it accumulated capabilities over time, planning increasingly complex goals by composing skills it had previously mastered. It is a glimpse of agents that improve through experience.
+
+## Tree of Thought for planning and dynamic re-planning
+
+Planning can itself be a search. **Tree of Thought** (Topic 32) applied to planning explores multiple candidate plans, evaluates them, and selects the most promising — useful when the best plan is not obvious. But the most important capability is **dynamic re-planning**: plans made upfront inevitably encounter reality, and steps fail, return surprising results, or reveal the plan was flawed. A robust agent monitors execution and *re-plans* when needed — adjusting remaining steps, retrying a failed step differently, or rethinking the whole approach. A rigid agent that blindly follows a broken plan fails; an adaptive one that re-plans recovers. Dynamic re-planning is what makes planning robust in an unpredictable world.
+
+## Evaluation
+
+Planning agents are evaluated on more than final success. **Success rate** (did it achieve the goal?) is primary, but **plan quality** (was the plan sensible and efficient?), **efficiency** (how many steps/how much cost?), and **adaptivity** (did it recover from failures via re-planning?) all matter. A planning agent that succeeds but with a bloated, inefficient plan, or that cannot recover when a step fails, is fragile. These dimensions connect to agent evaluation broadly (Topic 47).
+
+## Planning horizon and the limits of foresight
+
+A practical question shapes every planning agent: how far ahead should it plan? The **planning horizon** — how many steps the agent commits to in advance — is a genuine trade-off. Planning the entire task upfront gives a complete roadmap but is brittle, because a long plan made with limited information is likely to be wrong about its later steps; reality will have diverged by the time the agent gets there. Planning only the next step or two is robust to surprises but loses the benefit of foresight, drifting back toward reactive behaviour.
+
+The pragmatic resolution most capable agents adopt is a *hierarchical* horizon: plan at a coarse level over the whole task (the major phases), but only flesh out the immediate next phase in detail, re-planning the details as each phase completes and new information arrives. This is how humans plan complex projects — a rough overall roadmap with detailed planning only for the near term — and it balances foresight against adaptivity. It also explains why plan-and-execute and ReAct are complements rather than rivals: the coarse plan provides direction (plan-and-execute), while step-by-step execution within each phase stays responsive to reality (ReAct), and re-planning bridges the two when the coarse plan meets a surprise. Thinking explicitly about the right horizon for your task — how much to commit to in advance versus decide on the fly — is a key design decision, and getting it wrong in either direction (too rigid a long plan, or too myopic a reactive loop) is a common cause of agents that either break on surprises or wander without direction.
+
+## Skill libraries and learning over time
+
+Voyager's most forward-looking idea — the **skill library** — deserves elaboration, because it points toward agents that genuinely improve with experience. A skill library is a store of reusable procedures the agent has previously figured out: once Voyager learned to craft a tool or reach a location, it saved that procedure as a callable skill and could invoke it later rather than re-deriving it. Over time, the agent's repertoire grew, and it could plan ambitious goals by composing skills it had already mastered, much as a programmer builds on a library of functions rather than rewriting everything from scratch.
+
+This is a powerful pattern with broad applicability beyond games. An agent that saves successful procedures — a sequence of tool calls that accomplished a sub-task, a piece of code that worked, a strategy that solved a class of problem — and retrieves them when facing similar tasks effectively learns without retraining its weights. It is a form of long-term procedural memory (Topic 44) applied to *how to do things*. The challenge is the same as with all memory: deciding which procedures are worth saving, keeping the library organized and retrievable, and recognizing when a new task matches a stored skill. Done well, it lets an agent get better at a domain over many sessions purely through accumulated experience, which is a meaningfully different and more powerful thing than a stateless agent that approaches every task fresh. Skill libraries remain an active research area, but they represent one of the more promising directions for agents that improve over time rather than remaining static, and they connect planning directly to the memory and learning themes of this phase.
+
+## Decomposition is the core skill
+
+Stepping back, the single most important capability underlying all of planning is **decomposition** — the ability to take a large, ambiguous goal and break it into well-defined, achievable pieces. Every planning approach in this topic is ultimately a strategy for decomposition: least-to-most decomposes by difficulty, plan-and-execute decomposes into an ordered list, hierarchical planning decomposes recursively. And decomposition quality largely determines agent success: a good decomposition turns an intractable goal into a series of steps each of which the agent can actually accomplish, while a poor decomposition produces steps that are too big, ill-defined, or in the wrong order, and the execution fails no matter how good the executor.
+
+This is why decomposition tracks model capability so closely and why it is worth investing in. Decomposing a goal well requires understanding the goal, knowing what the agent and its tools can do, and reasoning about dependencies and order — exactly the kind of reasoning that stronger models do better. It is also a place where a little human guidance goes a long way: providing the agent with a good decomposition, or examples of how similar goals decompose, can dramatically improve reliability on complex tasks. As you build planning agents, treat the decomposition step as the highest-leverage part of the system — the part most worth a capable model, careful prompting, and evaluation — because a goal broken into the right steps is most of the way to being solved, and a goal broken into the wrong steps is most of the way to failing. The executor gets the attention, but the planner, and specifically its decomposition, is where planning agents most often succeed or fail.
+
+## Code Example
+
+The code implements a plan-and-execute agent: a planner generates an ordered step list, an executor runs each step, and the agent re-plans if a step reveals a problem.
+
+<CodeBlock lang="python" filename="plan_execute.py" code={`# plan_execute.py
+# pip install anthropic
+import os, json
+from anthropic import Anthropic
+
+client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+def llm(system, user, max_tokens=500):
+    return client.messages.create(
+        model="claude-opus-4-8", max_tokens=max_tokens,
+        system=system, messages=[{"role": "user", "content": user}],
+    ).content[0].text
+
+# --- PLANNER: decompose the goal into ordered steps ---
+def make_plan(goal):
+    out = llm(
+        "You are a planner. Output a JSON list of 3-5 concise, ordered steps.",
+        f"Goal: {goal}\\nRespond with ONLY a JSON array of step strings.")
+    start, end = out.find("["), out.rfind("]") + 1
+    return json.loads(out[start:end])
+
+# --- EXECUTOR: carry out one step given prior results ---
+def execute_step(step, context):
+    return llm("You are an executor. Complete the step concisely using the context.",
+               f"Context so far:\\n{context}\\n\\nStep: {step}")
+
+# --- PLAN-AND-EXECUTE loop with simple re-planning hook ---
+def plan_and_execute(goal):
+    plan = make_plan(goal)
+    print("PLAN:", plan)
+    context = ""
+    for i, step in enumerate(plan, 1):
+        result = execute_step(step, context)
+        print(f"\\n[Step {i}] {step}\\n -> {result[:120]}")
+        context += f"\\nStep {i} ({step}): {result}"
+        # (Re-planning hook: inspect 'result'; if it signals failure,
+        #  call make_plan again on the remaining goal and continue.)
+    final = llm("Synthesize a final answer from the completed steps.",
+                f"Goal: {goal}\\n\\nWork:\\n{context}")
+    return final
+
+print("\\nFINAL:\\n", plan_and_execute(
+    "Compare REST and GraphQL APIs and recommend one for a mobile app."))
+
+# Expected: a plan like ["Define REST", "Define GraphQL", "Compare", "Recommend"],
+# each step executed in order, then synthesized into a final recommendation.
+`} />
+
+The agent first *plans* — decomposing the goal into an ordered list of steps — then *executes* each step in sequence, accumulating context so later steps build on earlier ones, and finally synthesizes a result. The re-planning hook (commented) is where a production agent would monitor for failures and adjust the remaining plan. This plan-then-execute structure, with re-planning, is how agents reliably tackle goals far too big for a single step to handle.
+
+<PaperLink
+  title="Voyager: An Open-Ended Embodied Agent with Large Language Models"
+  authors="Wang, Xie, Jiang, et al."
+  year={2023}
+  venue="NeurIPS"
+  url="https://arxiv.org/abs/2305.16291"
+/>
+
+<KeyTakeaways phase={5}>
+- **Planning** decomposes a big goal into ordered, executable sub-tasks, letting agents tackle long-horizon work a single step cannot.
+- Approaches include **least-to-most** (simplest subproblems first), **plan-and-execute** (explicit upfront plan, then execute), and **CoT planning** (implicit reasoning).
+- **Plan-and-execute** separates planning from doing — inspectable and trackable — while **ReAct** decides step by step; the best agents **combine** them.
+- **Voyager** showed agents that plan their own goals, write code to achieve them, and build a reusable **skill library** — lifelong learning through accumulated skills.
+- **Dynamic re-planning** is crucial: plans meet reality, steps fail, and a robust agent monitors execution and adjusts rather than blindly following a broken plan.
+- Evaluate planning on **success rate, plan quality, efficiency, and adaptivity** — not just whether the goal was reached.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What is the difference between plan-and-execute and ReAct?",
+    options: ["They are identical", "Plan-and-execute generates a full plan upfront then executes it (structured, trackable); ReAct decides the next action after each observation (adaptive, step by step)", "ReAct uses no tools", "Plan-and-execute has no steps"],
+    correctIndex: 1,
+    explanation: "Plan-and-execute commits to an explicit ordered plan before acting, making progress trackable; ReAct interleaves thinking and acting, deciding each next step from the latest observation. The best agents combine both."
+  },
+  {
+    question: "Why is dynamic re-planning important?",
+    options: ["It is not", "Upfront plans meet reality — steps fail or reveal the plan was flawed — so a robust agent monitors execution and adjusts rather than blindly following a broken plan", "It makes plans longer", "It removes the need for tools"],
+    correctIndex: 1,
+    explanation: "No plan survives contact with reality unchanged. An agent that re-plans when steps fail or surprise it can recover and succeed, whereas one that rigidly follows a broken plan fails."
+  },
+  {
+    question: "What capability did Voyager notably demonstrate?",
+    options: ["Faster tokenization", "An agent that plans its own goals, writes code to achieve them, and builds a reusable skill library — lifelong learning through accumulated skills", "Bidirectional attention", "Cheaper training"],
+    correctIndex: 1,
+    explanation: "Voyager, a Minecraft agent, planned increasingly complex goals and accumulated a library of reusable skills it could compose later, showcasing lifelong learning through experience."
+  }
+]} />
+
+## What's Next
+
+You can build planning, multi-agent, memory-equipped agents — but how do you know they work, and how do you debug them when they don't? In **Agent Evaluation & Observability**, we study how to measure agent behaviour and trace what an agent actually does, the foundation for trustworthy agents.

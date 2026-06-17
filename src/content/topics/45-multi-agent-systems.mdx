@@ -1,0 +1,181 @@
+---
+title: "Multi-Agent Systems & Orchestration"
+subtitle: "Networks of specialized agents collaborating to solve complex problems"
+phase: 5
+topicNumber: 45
+slug: "multi-agent-systems"
+readingTime: 16
+prerequisites: ["langgraph"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('multi-agent-systems');
+
+<TopicHero topic={topic} />
+
+A single agent can do a lot, but some problems are better solved by a *team*. A complex software project benefits from a researcher, a coder, and a reviewer; a debate benefits from opposing advocates and a judge. **Multi-agent systems** coordinate several specialized agents — each with its own role, tools, and prompt — to tackle problems that overwhelm a single generalist agent. This topic covers why and when multiple agents help, the major coordination patterns (supervisor, hierarchical, peer-to-peer, pipeline, debate), how agents communicate, the orchestration frameworks, and the real failure modes that make multi-agent systems tricky.
+
+A note of caution up front: multi-agent systems are powerful but add coordination complexity and cost, and they are not always better than one good agent. Knowing *when* the added complexity pays off is as important as knowing *how* to build them.
+
+## Why multi-agent systems?
+
+Three reasons motivate multiple agents. **Specialization**: an agent with a focused role and tailored prompt and tools often outperforms a generalist on its slice of the work — a dedicated code reviewer catches more than a do-everything agent. **Parallelism**: independent subtasks can run concurrently across agents, speeding up the whole. **Verification**: separating the agent that *produces* work from the agent that *checks* it (a writer and an editor) catches errors a single agent would miss, because the checker approaches with fresh eyes and a critical mandate. When a task naturally decomposes into distinct roles, multi-agent structure can genuinely beat a monolithic agent.
+
+## Coordination patterns
+
+Several patterns structure how agents work together:
+
+- **Supervisor + workers**: a supervisor agent receives the goal, delegates subtasks to specialist worker agents, and synthesizes their results. The most common and controllable pattern.
+- **Hierarchical**: supervisors of supervisors — a tree of delegation for very complex tasks, where mid-level agents coordinate their own sub-teams.
+- **Peer-to-peer**: agents communicate directly with each other, no central coordinator — flexible but harder to control.
+- **Sequential pipeline**: agent A's output feeds agent B, then C — an assembly line (research → write → edit).
+- **Debate**: two or more agents argue opposing positions and a judge agent decides, surfacing considerations a single perspective would miss.
+
+<ComparisonTable
+  phase={5}
+  headers={["Pattern", "Structure", "Best for", "Risk"]}
+  rows={[
+    ["Supervisor + workers", "Central coordinator delegates", "Most decomposable tasks", "Supervisor bottleneck"],
+    ["Hierarchical", "Tree of supervisors", "Very large, complex tasks", "Coordination overhead"],
+    ["Peer-to-peer", "Direct agent communication", "Flexible collaboration", "Hard to control, can diverge"],
+    ["Sequential pipeline", "A -> B -> C assembly line", "Clear staged workflows", "Early errors propagate"],
+    ["Debate", "Advocates + judge", "Hard decisions, reducing bias", "Cost, can entrench positions"],
+  ]}
+  caption="Multi-agent coordination patterns and their trade-offs."
+/>
+
+## The supervisor pattern in depth
+
+The **supervisor** pattern deserves special attention because it is the most useful and controllable. A supervisor agent holds the overall goal and a roster of specialist workers (each described by what it does). It decides which worker to invoke next, passes it a focused subtask, receives the result, and decides what to do next — perhaps invoke another worker, or synthesize a final answer. This centralizes control (the supervisor sees the whole picture and directs the flow) while leveraging specialization (each worker is an expert at its narrow job). It maps cleanly onto LangGraph: the supervisor is a routing node, the workers are nodes, and conditional edges direct the flow. Its main risk is the supervisor becoming a bottleneck or making poor routing decisions, mitigated by a capable supervisor model and clear worker descriptions.
+
+## Agent communication
+
+How do agents share information? Three models. **Shared memory/state**: all agents read and write a common state object (LangGraph's shared state) — simple and transparent. **Message passing**: agents send explicit messages to each other, like an organization's communication — flexible, models real delegation. **Blackboard**: agents read and write to a shared "blackboard" of intermediate results, a classic AI pattern. The choice shapes how tightly coupled the agents are and how their information flows; shared state is the common default in framework-based systems.
+
+## Orchestration frameworks
+
+Several frameworks specialize in multi-agent orchestration. **LangGraph** (Topic 43) builds multi-agent systems as graphs with supervisor and worker nodes. **AutoGen** (Microsoft) is a conversational multi-agent framework where agents collaborate through structured conversations — agents "talk" to each other to solve tasks. **CrewAI** models agents as a "crew" with defined roles, goals, and a process (sequential or hierarchical) — a higher-level, role-playing abstraction. Each offers a different level of abstraction over the same core idea: multiple agents, coordinated.
+
+## Failure modes
+
+Multi-agent systems introduce failure modes a single agent does not have. **Cascading failures**: one agent's error propagates and corrupts everything downstream, especially in pipelines. **Infinite loops**: agents pass work back and forth without converging. **Contradiction and incoherence**: agents reach inconsistent conclusions with no resolution. **Cost explosion**: every agent is LLM calls, so a multi-agent system can cost many times a single agent for the same task. **Coordination overhead**: the communication itself consumes tokens and time. These are why multi-agent systems are not a default — they pay off when specialization and parallelism genuinely help, but add real complexity and cost.
+
+<Callout type="warning" title="More agents is not automatically better">
+A multi-agent system multiplies cost and adds coordination failure modes. Often a single capable agent with good tools outperforms an elaborate multi-agent setup on the same task, at a fraction of the cost. Reach for multiple agents when specialization or parallelism clearly helps — not by default.
+</Callout>
+
+## Evaluation
+
+Evaluating multi-agent systems is harder than single agents: you must assess not just the final output but the coordination — did agents delegate well, communicate clearly, avoid loops, and stay coherent? Beyond end-to-end task success, useful signals include per-agent contribution, the number of messages/steps to completion (efficiency), and whether the system converged. This connects to agent evaluation broadly (Topic 47), with the added dimension of coordination quality.
+
+## The single-agent-first principle
+
+A piece of hard-won wisdom in the agent community is to *start with a single agent and add more only when forced to*. It is tempting to reach for an elaborate multi-agent architecture because it feels sophisticated, but in practice a single capable agent with a good set of tools handles a remarkable range of tasks, and it is far simpler to build, debug, and operate. Every agent you add multiplies the cost, introduces coordination that can fail, and makes the system harder to reason about. The complexity should be justified by a problem that genuinely needs it, not adopted for its own sake.
+
+The signals that you have genuinely outgrown a single agent are concrete. The task has *distinct phases* that benefit from different specialized skills, prompts, or tool sets. Parts of the work are *independent* and would benefit from running in parallel. Or the task needs *independent verification* — a separate critical perspective that a single agent, invested in its own output, struggles to provide. When you see these signals, multi-agent structure earns its complexity. Absent them, a single well-equipped agent is usually the better engineering choice. This mirrors the workflow-versus-agent restraint from Topic 39 and the framework restraint from Topic 42: the recurring lesson of this phase is that capability comes with complexity, and good engineering means adding only the complexity the problem actually requires. The most impressive multi-agent demo is worthless if a single agent would have done the job more reliably at a tenth of the cost.
+
+## Designing agent roles and prompts
+
+When a multi-agent system *is* warranted, much of its success rests on how well you define each agent's *role*. A good agent role is *focused* — one clear responsibility, not a vague mandate — with a system prompt that establishes its expertise, its specific job, the format of its output, and how it should hand off to others. A researcher agent should know it gathers and reports facts and does not write prose; a writer should know it turns facts into polished text and does not invent new facts; a reviewer should know it critiques and does not rewrite. Sharp role boundaries prevent agents from duplicating work, stepping on each other, or blurring into redundant generalists.
+
+The interfaces *between* agents matter as much as the roles. What exactly does the researcher pass to the writer — raw notes, structured findings, a summary? Ambiguous handoffs are where multi-agent systems leak quality, because each agent must interpret what the previous one produced, and misinterpretation compounds down the chain. Designing clean, well-specified handoffs — ideally structured rather than free-form prose — is the multi-agent analogue of designing good tool interfaces from Topic 41, and it deserves the same care. In effect, building a multi-agent system is organizational design: you are defining roles, responsibilities, reporting lines, and communication protocols, and the same principles that make a human team effective — clear roles, clean interfaces, good coordination, avoiding both gaps and overlaps — make an agent team effective. Thinking of it as designing an organization, rather than just wiring up LLM calls, is the right frame for getting it right.
+
+## Emergent behaviour and the frontier
+
+Multi-agent systems are an active research frontier, and a few forward-looking observations help place them. Interesting *emergent* behaviours can arise when agents interact — productive division of labour, the surfacing of considerations no single agent would have raised, and in debate setups, more robust conclusions than any individual agent reaches. But the same interactivity can produce undesirable emergence: agents reinforcing each other's errors, converging prematurely on a bad consensus, or amplifying biases. Coordinating agents well enough to get the good emergence without the bad is genuinely unsolved, and it is part of what makes the area exciting and difficult.
+
+The trajectory, as with everything in this phase, tracks base-model capability. As models get better at reasoning, instruction-following, and tool use, both single agents and multi-agent systems become more capable, and the threshold at which multi-agent structure pays off shifts. Some tasks that once needed a team of specialized agents become solvable by one stronger agent; other, more ambitious tasks become newly feasible for agent teams. The practical stance for a builder is to stay grounded: use the simplest structure that solves your problem today, keep an eye on how rapidly capabilities are advancing, and revisit architectural choices as models improve, because a multi-agent workaround for a weak model's limitations may become unnecessary complexity once a stronger model arrives. The frontier is moving fast, and the durable skill is not mastery of any particular orchestration framework but the judgment to match system complexity to genuine need — a judgment that the closing topics on evaluation and production will sharpen further.
+
+## Code Example
+
+The code builds a supervisor-and-workers system: a supervisor routes a task to a researcher or writer worker, using LangGraph-style coordination expressed with direct Anthropic calls for clarity.
+
+<CodeBlock lang="python" filename="multi_agent.py" code={`# multi_agent.py
+# pip install anthropic
+import os
+from anthropic import Anthropic
+
+client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+def call(system, user, max_tokens=400):
+    return client.messages.create(
+        model="claude-opus-4-8", max_tokens=max_tokens,
+        system=system, messages=[{"role": "user", "content": user}],
+    ).content[0].text
+
+# --- Specialist worker agents ---
+def researcher(task):
+    return call("You are a research specialist. Gather and list key facts concisely.",
+                task)
+
+def writer(task, facts):
+    return call("You are a writer. Produce clear, polished prose from the given facts.",
+                f"Task: {task}\\n\\nFacts:\\n{facts}")
+
+def reviewer(draft):
+    return call("You are an editor. Critique the draft in 2 bullet points.", draft)
+
+# --- Supervisor coordinates the workers (sequential pipeline) ---
+def supervisor(goal):
+    print("[supervisor] delegating to researcher...")
+    facts = researcher(f"Find key facts for: {goal}")
+    print("[supervisor] delegating to writer...")
+    draft = writer(goal, facts)
+    print("[supervisor] delegating to reviewer...")
+    critique = reviewer(draft)
+    return {"draft": draft, "critique": critique}
+
+result = supervisor("Write a 3-sentence summary of why multi-agent systems help.")
+print("\\nDRAFT:\\n", result["draft"])
+print("\\nCRITIQUE:\\n", result["critique"])
+
+# Expected: researcher gathers facts, writer drafts prose, reviewer critiques —
+# each specialist doing one job, coordinated by the supervisor.
+`} />
+
+The supervisor orchestrates three specialists — researcher, writer, reviewer — each with a focused system prompt and a single job, passing work between them. This separation of roles often produces better results than asking one agent to research, write, *and* self-critique in a single pass, because each specialist brings focused attention. But notice the cost: three LLM calls instead of one. That is the multi-agent bargain — better quality through specialization and verification, at the price of more calls and coordination, worth it when the task genuinely benefits.
+
+<KeyTakeaways phase={5}>
+- **Multi-agent systems** coordinate specialized agents; they help through **specialization**, **parallelism**, and **verification** (separating producing work from checking it).
+- Patterns: **supervisor + workers** (central delegation, most common), **hierarchical**, **peer-to-peer**, **sequential pipeline**, and **debate**.
+- The **supervisor** pattern centralizes control while leveraging specialists; it maps cleanly to a LangGraph router node plus worker nodes.
+- Agents communicate via **shared state**, **message passing**, or a **blackboard**; frameworks include **LangGraph, AutoGen, and CrewAI**.
+- Failure modes — **cascading errors, loops, contradiction, cost explosion, coordination overhead** — make multi-agent systems complex and expensive.
+- **More agents is not automatically better**: a single capable agent often wins; use multiple agents only when specialization or parallelism clearly pays off.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What is the main advantage of the supervisor pattern?",
+    options: ["It uses no LLM calls", "It centralizes control — a supervisor sees the whole goal and delegates focused subtasks to specialist workers — while leveraging specialization", "It removes the need for tools", "It is always the cheapest"],
+    correctIndex: 1,
+    explanation: "The supervisor holds the overall goal and routes focused subtasks to specialist workers, combining central, coherent control with the benefits of specialized agents."
+  },
+  {
+    question: "Why is a multi-agent system not automatically better than a single agent?",
+    options: ["Agents cannot communicate", "It multiplies cost and adds coordination failure modes (cascading errors, loops, contradiction); often one capable agent wins", "Single agents have no tools", "Multi-agent systems cannot be evaluated"],
+    correctIndex: 1,
+    explanation: "Every agent means more LLM calls and new failure modes like cascading errors and loops. Multi-agent structure pays off only when specialization or parallelism clearly helps; otherwise a single good agent is simpler and cheaper."
+  },
+  {
+    question: "How does separating a 'producer' agent from a 'checker' agent help?",
+    options: ["It halves the cost", "The checker approaches the work with fresh eyes and a critical mandate, catching errors the producer (focused on creating) would miss", "It removes the need for prompts", "It eliminates all errors"],
+    correctIndex: 1,
+    explanation: "Verification by a separate agent (e.g. a reviewer or editor) brings a critical, independent perspective that a single agent focused on producing the work tends to overlook."
+  }
+]} />
+
+## What's Next
+
+Whether single or multi-agent, complex goals require breaking the work into manageable steps. In **Planning & Task Decomposition**, we study how agents decompose big goals into executable sub-tasks — plan-and-execute, least-to-most, and dynamic re-planning when steps fail.

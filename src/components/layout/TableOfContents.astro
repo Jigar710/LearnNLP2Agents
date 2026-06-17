@@ -1,0 +1,118 @@
+---
+/**
+ * TableOfContents (PRD §10.5 / Step 5.3) — right "On this page" sidebar.
+ * Built from the MDX H2/H3 headings; IntersectionObserver highlights the
+ * active section; smooth scroll is handled globally (scroll-behavior + padding).
+ */
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+interface Props {
+  headings?: Heading[];
+  readingTime?: number;
+}
+const { headings = [], readingTime } = Astro.props;
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+---
+
+<aside class="toc" data-pagefind-ignore>
+  <div class="toc-inner">
+    <p class="toc-title">On this page</p>
+    {readingTime ? <span class="toc-read">Est. {readingTime} min read</span> : null}
+    {
+      toc.length > 0 ? (
+        <ul class="toc-list">
+          {toc.map((h) => (
+            <li class={`toc-item depth-${h.depth}`}>
+              <a href={`#${h.slug}`} data-slug={h.slug}>{h.text}</a>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p class="toc-empty">—</p>
+      )
+    }
+  </div>
+</aside>
+
+<style>
+  .toc {
+    position: sticky;
+    top: 60px;
+    height: calc(100vh - 60px);
+    overflow-y: auto;
+    padding: 1.5rem 1rem;
+  }
+  .toc-title {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin: 0 0 0.3rem;
+  }
+  .toc-read {
+    display: inline-block;
+    font-size: 0.72rem;
+    color: var(--accent, var(--phase-1));
+    background: color-mix(in srgb, var(--accent, var(--phase-1)) 12%, transparent);
+    padding: 1px 8px;
+    border-radius: 9999px;
+    margin-bottom: 0.85rem;
+  }
+  .toc-list {
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    border-left: 1px solid var(--border-color);
+  }
+  .toc-item a {
+    display: block;
+    padding: 0.28rem 0 0.28rem 0.85rem;
+    margin-left: -1px;
+    border-left: 2px solid transparent;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    color: var(--text-secondary);
+  }
+  .toc-item.depth-3 a {
+    padding-left: 1.6rem;
+    font-size: 0.77rem;
+  }
+  .toc-item a:hover { color: var(--text-primary); }
+  .toc-item a.is-active {
+    color: var(--accent, var(--phase-1));
+    border-left-color: var(--accent, var(--phase-1));
+    font-weight: 500;
+  }
+  .toc-empty { color: var(--text-muted); }
+</style>
+
+<script>
+  const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('.toc-item a'));
+  if (links.length) {
+    const bySlug = new Map(links.map((l) => [l.dataset.slug, l]));
+    const visible = new Set<string>();
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const id = e.target.id;
+          if (e.isIntersecting) visible.add(id);
+          else visible.delete(id);
+        }
+        links.forEach((l) => l.classList.remove('is-active'));
+        // Highlight the first heading currently in view (top-most).
+        const headings = Array.from(document.querySelectorAll<HTMLElement>('h2[id], h3[id]'));
+        const firstVisible = headings.find((h) => visible.has(h.id));
+        const target = firstVisible ? bySlug.get(firstVisible.id) : undefined;
+        if (target) target.classList.add('is-active');
+      },
+      { rootMargin: '-70px 0px -70% 0px', threshold: 0 }
+    );
+
+    document.querySelectorAll('h2[id], h3[id]').forEach((h) => observer.observe(h));
+  }
+</script>

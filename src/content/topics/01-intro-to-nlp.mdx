@@ -1,0 +1,217 @@
+---
+title: "Introduction to NLP & Pipeline"
+subtitle: "What NLP is, why it's hard, and how the full pipeline works"
+phase: 1
+topicNumber: 1
+slug: "intro-to-nlp"
+readingTime: 12
+prerequisites: []
+hasCode: true
+hasMath: false
+hasInteractiveDemo: true
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import DiagramWrapper from '../../components/topic/DiagramWrapper.astro';
+import NLPPipeline from '../../components/diagrams/NLPPipeline.tsx';
+
+export const topic = getTopicBySlug('intro-to-nlp');
+
+<TopicHero topic={topic} />
+
+Natural Language Processing (NLP) is the branch of artificial intelligence concerned with getting computers to read, understand, and generate human language. Every time you autocomplete a text message, ask a voice assistant for the weather, translate a webpage, or get a useful answer from a chatbot, an NLP system is doing the work behind the scenes. It sits at the intersection of linguistics, computer science, and machine learning, and over the last decade it has gone from a niche academic field to the technology powering some of the most widely used products on earth.
+
+This first topic gives you the map for everything that follows. We will define what NLP actually is, build intuition for *why language is so much harder for machines than it looks*, and walk through the classic processing pipeline that turns a raw string of characters into structured information a model can reason about. By the end you will understand the vocabulary the rest of this curriculum assumes, and you will have run a real end-to-end pipeline in Python.
+
+Think of this topic as the trailhead. The trail leads from counting words, through embeddings and Transformers, all the way to autonomous agents — but every step builds on the ideas introduced here.
+
+## What is NLP?
+
+NLP is the study and engineering of systems that process language as *data*. That data is unusually slippery. An image is a fixed grid of pixels; an audio clip is a waveform sampled at a fixed rate. Language, by contrast, is discrete, symbolic, deeply ambiguous, and shot through with meaning that depends on context, culture, and intent.
+
+It helps to distinguish NLP from a neighbouring field, computer vision (CV). In CV the raw signal — pixel intensities — already carries most of the information; a cat is recognizable from the pixels alone. In NLP the raw signal is a sequence of characters that are merely *pointers* to meaning. The word "bank" is five bytes whether it refers to a river's edge or a financial institution. Nothing in the characters tells you which. Recovering meaning from symbols is the central challenge of the field.
+
+NLP is usually split into two complementary halves:
+
+- **Natural Language Understanding (NLU)** — going *from* text *to* structured meaning. Tasks include classifying sentiment, extracting entities, answering questions, and detecting intent.
+- **Natural Language Generation (NLG)** — going *from* structured meaning or context *to* fluent text. Tasks include summarization, translation, and dialogue.
+
+Modern large language models blur this line because a single model both understands and generates, but the distinction is still useful for reasoning about what a system is being asked to do.
+
+<Callout type="tip">
+A quick mental test: if the output is a label, a span, or a structure, you are doing NLU. If the output is new text, you are doing NLG. Many real systems chain both — understand the user, then generate a reply.
+</Callout>
+
+## Why is language hard for machines?
+
+If language is so natural for humans, why is it hard for computers? The short answer is **ambiguity**: almost every level of language admits multiple valid interpretations, and humans resolve them effortlessly using context and world knowledge that machines do not automatically have.
+
+**Lexical ambiguity** — a single word has multiple senses. "I went to the bank" could involve a river or a vault. "Book" can be a noun or a verb. Resolving which sense is meant is called word-sense disambiguation.
+
+**Syntactic ambiguity** — the same sequence of words can be grouped into different grammatical structures. The classic example, "I saw the man with the telescope," has two readings: did you use the telescope to see the man, or did the man have the telescope? Both are grammatical; only context decides.
+
+**Referential ambiguity** — pronouns and descriptions point at things, and figuring out what they point at is hard. In "The trophy didn't fit in the suitcase because it was too big," what does "it" refer to? Swap "big" for "small" and the answer flips, even though the sentence structure is identical. This is the famous Winograd schema, and it shows how much world knowledge language understanding requires.
+
+On top of ambiguity, language is **productive and irregular**. Speakers invent new words ("doomscrolling"), bend grammar, use sarcasm and idioms ("it's raining cats and dogs" has nothing to do with animals), and rely on shared context ("see you there" — where?). Spelling varies, typos abound, and meaning shifts over time and across communities. A system that works perfectly on clean newswire text can fall apart on tweets.
+
+<Callout type="warning" title="Common misconception">
+Beginners often assume bigger dictionaries or more grammar rules will solve NLP. They will not. The hard part is not vocabulary — it is resolving ambiguity using context, which is why statistical and neural methods that *learn* from data have dominated the field.
+</Callout>
+
+## The standard NLP pipeline
+
+Classical NLP systems process text through a sequence of stages, each refining the representation a little further. Even though modern end-to-end neural models collapse many of these steps internally, the pipeline remains the best mental model for what "processing language" involves, and many production systems still run these stages explicitly.
+
+<DiagramWrapper title="The 8-stage NLP pipeline" caption="Click any stage to see what it does and an example of its input and output.">
+  <NLPPipeline client:visible />
+</DiagramWrapper>
+
+The eight canonical stages are:
+
+1. **Raw text** — the unprocessed input, exactly as received from a file, web page, or user. It may contain HTML, emoji, inconsistent whitespace, and encoding quirks.
+2. **Sentence splitting (segmentation)** — dividing the text into sentences. Harder than it sounds: a period can end a sentence, mark an abbreviation ("Dr."), or sit inside a decimal ("3.14").
+3. **Tokenization** — breaking each sentence into tokens: words, punctuation, or sub-word units. "isn't" might become `is` + `n't`.
+4. **Normalization** — standardizing tokens: lowercasing, expanding contractions, stripping accents, handling numbers and URLs. The goal is to reduce needless variation.
+5. **Part-of-speech (POS) tagging** — labelling each token with its grammatical category: noun, verb, adjective, and so on.
+6. **Parsing** — recovering syntactic structure, typically as a dependency tree showing which words modify which.
+7. **Feature extraction** — turning the linguistic structure into numbers a model can consume: counts, TF-IDF weights, or embeddings.
+8. **Model** — a downstream component that uses those features to perform a task such as classification, named-entity recognition, or translation.
+
+Each stage can introduce errors that propagate downstream — a tokenizer that mishandles "U.S.A." will confuse everything after it. This *cascading error* problem is one reason the field moved toward end-to-end models that learn the whole mapping jointly.
+
+## Real-world NLP applications
+
+NLP is not a single product; it is a toolbox that shows up across the software world. A few of the most common applications:
+
+- **Search and information retrieval** — ranking documents by relevance to a query. Google, Elasticsearch, and every "search bar" you use rely on NLP.
+- **Machine translation** — converting text between languages, as in Google Translate or DeepL.
+- **Chatbots and assistants** — understanding a request and producing a helpful reply, from customer-support bots to ChatGPT.
+- **Summarization** — condensing long documents into short, faithful summaries.
+- **Sentiment and intent analysis** — gauging opinion in reviews or routing support tickets.
+- **Speech interfaces** — once audio is transcribed to text, NLP handles the meaning.
+
+These applications differ wildly in difficulty. Sentiment analysis on movie reviews is comparatively easy: the signal ("great", "terrible") is local and surface-level. Machine translation is much harder, because it requires understanding the *full* meaning of the source and re-expressing it fluently in another language with different grammar, idioms, and word order. As a rule of thumb, tasks that require deep understanding and generation are harder than tasks that require shallow pattern-matching.
+
+## NLP subfields
+
+The field is conventionally carved into several overlapping subfields, and you will see these acronyms throughout the literature:
+
+- **IR (Information Retrieval)** — finding relevant documents (search engines).
+- **MT (Machine Translation)** — translating between languages.
+- **QA (Question Answering)** — answering natural-language questions, either from a passage or from world knowledge.
+- **IE (Information Extraction)** — pulling structured facts (entities, relations, events) out of unstructured text.
+- **NLG (Natural Language Generation)** — producing fluent text from data or context.
+- **NLU (Natural Language Understanding)** — mapping text to structured meaning.
+
+You do not need to memorize the boundaries — they leak into each other constantly — but knowing the vocabulary helps you read papers and navigate libraries.
+
+## A brief history of NLP
+
+Knowing how the field evolved makes the rest of this curriculum easier to place in context. NLP has passed through three broad eras.
+
+The **symbolic era** (1950s–1980s) treated language as a system of hand-written rules. Early machine-translation projects tried to translate Russian to English with bilingual dictionaries and grammar rules, and famously underestimated the difficulty of ambiguity. In 1966 Joseph Weizenbaum built ELIZA, a pattern-matching "therapist" that fooled people despite having no understanding at all. The lesson of the era was sobering: hand-crafted rules are brittle and do not scale to the messiness of real language.
+
+The **statistical era** (1990s–2000s) replaced rules with probabilities learned from data. Researchers built large annotated corpora and trained models such as n-gram language models, hidden Markov models for tagging, and statistical machine translation. Instead of asking "what rule applies here?", systems asked "what is most probable given the data I have seen?". This data-driven mindset is the philosophical core of everything that followed.
+
+The **neural era** (2010s–present) replaced hand-engineered features with representations *learned* by neural networks. Word2Vec (2013) showed that words could be embedded as dense vectors capturing meaning; sequence-to-sequence models (2014) and attention (2015) transformed translation; the Transformer (2017) unified the field; and pre-trained models like BERT and GPT, scaled into today's large language models, now set the state of the art on nearly every task. Each phase of this curriculum follows that arc.
+
+## Levels of linguistic analysis
+
+Linguists describe language at several levels, and NLP tasks usually target one or more of them. Keeping these levels straight helps you reason about *what kind* of information a system needs.
+
+- **Morphology** — the structure of words. "Unhappiness" decomposes into the prefix *un-*, root *happy*, and suffix *-ness*. Morphology matters for stemming, lemmatization, and handling languages with rich inflection.
+- **Syntax** — how words combine into grammatical phrases and sentences. Parsing recovers this structure.
+- **Semantics** — literal meaning. What does a sentence assert about the world?
+- **Pragmatics** — meaning in context, including intent. "Can you pass the salt?" is literally a question about ability but pragmatically a request.
+- **Discourse** — meaning across multiple sentences: how pronouns resolve, how ideas connect, how a paragraph coheres.
+
+Surface tasks like spell-checking touch only the lowest levels, while genuine understanding — the kind a helpful assistant needs — requires reasoning all the way up to pragmatics and discourse. This is precisely why deep, context-aware models eventually displaced shallow pattern-matchers.
+
+## Code Example
+
+Let us make this concrete. The library [spaCy](https://spacy.io) packages most of the pipeline stages into a single, fast, production-grade tool. The snippet below loads a small English model, runs a sentence through it, and inspects the tokens, their part-of-speech tags, and any named entities it finds.
+
+<CodeBlock lang="python" filename="spacy_pipeline.py" code={`# spacy_pipeline.py
+# Install once:  pip install spacy && python -m spacy download en_core_web_sm
+import spacy
+
+# Load a small English pipeline (tokenizer + tagger + parser + NER).
+nlp = spacy.load("en_core_web_sm")
+
+text = "Dr. Smith bought 3 books from Amazon in London last week."
+doc = nlp(text)
+
+# 1) Tokens + part-of-speech tags + lemmas
+print("TOKEN        POS    LEMMA")
+for token in doc:
+    print(f"{token.text:<12} {token.pos_:<6} {token.lemma_}")
+
+# 2) Named entities (text span + entity label)
+print("\\nENTITIES")
+for ent in doc.ents:
+    print(f"{ent.text:<14} -> {ent.label_}")
+
+# Expected output (abridged):
+# TOKEN        POS    LEMMA
+# Dr.          PROPN  Dr.
+# Smith        PROPN  Smith
+# bought       VERB   buy
+# 3            NUM    3
+# books        NOUN   book
+# ...
+# ENTITIES
+# 3              -> CARDINAL
+# Amazon         -> ORG
+# London         -> GPE
+# last week      -> DATE
+`} />
+
+Notice how much linguistic structure the pipeline recovers from one sentence. `bought` is correctly lemmatized to `buy`. `Amazon` is tagged as an organization (`ORG`), `London` as a geopolitical entity (`GPE`), and `last week` as a `DATE`. That structured output — spans, labels, and relationships — is exactly what downstream applications like search or knowledge-graph construction consume.
+
+<Callout type="tip">
+spaCy runs all the pipeline stages for you in one call to `nlp(text)`. When you are learning, inspect the intermediate objects (`token.pos_`, `token.dep_`, `doc.ents`) to *see* each stage's output rather than treating the pipeline as a black box.
+</Callout>
+
+## How this connects to the rest of the curriculum
+
+Everything ahead is an elaboration of this pipeline. In the next few topics you will zoom into the early stages: corpora and tokenization (Topic 3), preprocessing (Topic 4), and turning tokens into numbers with Bag-of-Words and TF-IDF (Topic 5). Then you will replace those count-based features with learned embeddings (Topic 6), and eventually replace the whole hand-built pipeline with Transformers and large language models that learn the entire mapping from text to meaning end-to-end. The pipeline never disappears — it just gets absorbed into the weights of a neural network.
+
+<KeyTakeaways phase={1}>
+- **NLP turns symbolic language into structured meaning** — and back again — bridging linguistics, CS, and machine learning.
+- **The core difficulty is ambiguity**, not vocabulary: lexical, syntactic, and referential ambiguity must be resolved using context and world knowledge.
+- **NLU maps text to meaning; NLG maps meaning to text.** Many systems chain both.
+- **The classic pipeline has eight stages**, from raw text through tokenization and parsing to a task model; errors cascade downstream.
+- **Task difficulty varies enormously** — shallow pattern-matching (sentiment) is far easier than deep understand-and-generate tasks (translation).
+- **Modern neural models absorb the pipeline** into learned weights, but it remains the right mental model.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Which task is generally harder?",
+    options: ["Sentiment analysis of product reviews", "Machine translation between languages", "Both are equally hard", "Neither involves NLP"],
+    correctIndex: 1,
+    explanation: "Translation requires understanding the full meaning of the source and re-expressing it fluently in another language, while sentiment analysis often relies on shallow, local cues like 'great' or 'terrible'."
+  },
+  {
+    question: "What does 'ambiguity' refer to in NLP?",
+    options: ["Text that is too long to process", "The same input having multiple valid interpretations", "Spelling errors in the input", "Unsupported character encodings"],
+    correctIndex: 1,
+    explanation: "Ambiguity means a word, phrase, or sentence can be interpreted in more than one valid way (lexical, syntactic, or referential). Resolving it requires context and world knowledge."
+  },
+  {
+    question: "What is the difference between NLU and NLG?",
+    options: ["NLU generates text, NLG understands it", "NLU maps text to meaning; NLG maps meaning to text", "They are the same thing", "NLU is for speech, NLG is for writing"],
+    correctIndex: 1,
+    explanation: "Natural Language Understanding goes from text to structured meaning; Natural Language Generation goes from meaning or context to fluent text."
+  }
+]} />
+
+## What's Next
+
+You now have the map. Next, in **Linguistics Basics**, we zoom into the structure of language itself — parts of speech, named entities, and the parse trees that the pipeline's middle stages produce. That linguistic vocabulary will make every later topic, from embeddings to attention, easier to reason about.

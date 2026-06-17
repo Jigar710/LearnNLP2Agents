@@ -1,0 +1,202 @@
+---
+title: "Full Transformer — Attention is All You Need"
+subtitle: "The complete architecture that changed everything"
+phase: 2
+topicNumber: 17
+slug: "transformer-architecture"
+readingTime: 18
+prerequisites: ["transformer-encoder", "transformer-decoder"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: true
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+import DiagramWrapper from '../../components/topic/DiagramWrapper.astro';
+import TransformerArch from '../../components/diagrams/TransformerArch.tsx';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('transformer-architecture');
+
+<TopicHero topic={topic} />
+
+In 2017, a team at Google published a paper with an audacious title: *Attention Is All You Need*. Its claim was that you could throw away recurrence and convolution entirely and build a state-of-the-art sequence model from attention alone. The resulting architecture — the **Transformer** — did not just win at translation; it became the foundation of nearly all modern AI, from BERT and GPT to the large language models behind today's assistants. This topic assembles the complete model from the encoder and decoder you have already built, and explains the training recipe that made it work.
+
+You have the pieces: embeddings, positional encoding, multi-head self-attention, masked self-attention, cross-attention, feed-forward networks, residual connections, and layer normalization. Now we wire them into the full encoder-decoder model, walk through the original hyperparameters and training tricks, and use an interactive diagram to trace data through every block. By the end you will understand the architecture that defines an era.
+
+## The paper and why it mattered
+
+Before the Transformer, the best sequence models were recurrent (LSTM-based) with attention bolted on. They had two problems. First, recurrence is **inherently sequential** — you cannot compute step `t` until step `t−1` is done — which makes training slow and underuses parallel hardware like GPUs. Second, even with attention, very long-range dependencies were hard to learn because information had to flow through many recurrent steps.
+
+The Transformer's insight was that attention alone could replace recurrence. With self-attention, every token connects directly to every other in a single, fully parallel operation. Training that had taken weeks could be done in days, and the model handled long-range dependencies better. The architecture set new translation records and, more importantly, proved general enough to be adapted to almost every NLP task — and later to vision, audio, and biology.
+
+## The full architecture
+
+The complete Transformer is two stacks side by side. The **encoder** (left) is `N` identical layers, each with self-attention and a feed-forward network; it reads the source sequence and outputs a contextualized representation. The **decoder** (right) is `N` identical layers, each with masked self-attention, cross-attention into the encoder output, and a feed-forward network; it generates the target sequence.
+
+Data flows like this. Source tokens are embedded and given positional encodings, then pass through the encoder stack to produce a set of memory vectors. Target tokens (shifted right) are embedded, positionally encoded, and pass through the decoder stack — at each layer attending to themselves causally and to the encoder memory via cross-attention. The decoder's final vectors go through a linear projection and softmax to produce next-token probabilities over the vocabulary.
+
+<DiagramWrapper title="The complete Transformer" caption="Click any block to see its role and formula; use the toggles to trace the encoder, decoder, and cross-attention paths.">
+  <TransformerArch client:visible />
+</DiagramWrapper>
+
+## Embeddings, positional encoding, and the output head
+
+Three components frame the two stacks. At the input, an **embedding layer** maps token ids to `d_model`-dimensional vectors, scaled by `√d_model`, with **positional encodings** added so the model perceives order. At the output, a **linear layer plus softmax** turns the decoder's final vectors into a probability distribution over the vocabulary; its weights are typically *tied* to the input embedding matrix to save parameters. These framing pieces are shared by every Transformer variant.
+
+## The Mathematics: the training objective
+
+The Transformer is trained to maximize the likelihood of the correct next token at every position — equivalently, to minimize the **cross-entropy loss** between its predicted distribution and the true tokens:
+
+<MathBlock
+  formula="\mathcal{L} = -\sum_{t=1}^{T} \log P_\theta\big(y_t \mid y_{<t},\, x\big)"
+  caption="Cross-entropy: maximize the probability the model assigns to each true target token, given the source x and earlier targets."
+/>
+
+A distinctive part of the recipe is the **learning-rate schedule** with warmup. Rather than a fixed rate, the learning rate rises linearly for the first few thousand steps then decays, following:
+
+<MathBlock
+  formula="lr = d_{model}^{-0.5} \cdot \min\!\left(\text{step}^{-0.5},\; \text{step} \cdot \text{warmup}^{-1.5}\right)"
+  caption="Warmup-then-decay schedule; the warmup phase stabilizes early training of the deep, post-norm model."
+/>
+
+The warmup matters because the original Transformer used post-norm, which is sensitive to large early updates; ramping the learning rate up gently prevents the optimization from diverging in the first steps.
+
+## Label smoothing and other training details
+
+The paper added several tricks that became standard. **Label smoothing** softens the training targets: instead of asking the model to put all probability on the correct token (a one-hot target), it asks for, say, 90% on the correct token and the rest spread across the vocabulary. This counterintuitively *hurts* perplexity slightly but *improves* translation quality and calibration, because it stops the model from becoming overconfident. The optimizer was **Adam** with specific beta values, **dropout** of 0.1 was applied throughout, and the model was trained on byte-pair-encoded tokens (Topic 18).
+
+<Callout type="tip">
+Label smoothing is a lesson in itself: the metric you optimize (perplexity) is not always the metric you care about (translation quality). A slightly less confident model can generalize better. Watch for this gap throughout machine learning.
+</Callout>
+
+## Hyperparameters and original results
+
+The base Transformer used `d_model = 512`, `h = 8` heads, `d_ff = 2048`, and `N = 6` layers in each stack, totalling about 65 million parameters; a "big" variant doubled several of these. On the WMT 2014 English-to-German translation benchmark, the big Transformer achieved a BLEU score of 28.4, beating the previous best — including ensembles — while training in a fraction of the time. On English-to-French it set a new single-model record. These results, achieved with less compute than the recurrent competition, are what made the field pay attention.
+
+<Callout type="info" title="A note on parameter counts">
+The base model's ~65M parameters seemed large in 2017. Modern large language models have hundreds of billions to trillions — a 10,000× to 100,000× increase. The architecture barely changed; what changed was scale, which is the entire story of Phase 3.
+</Callout>
+
+## Why it works
+
+Three properties explain the Transformer's dominance. **Parallelism**: with no recurrence, all positions are processed simultaneously, so training scales beautifully on modern hardware. **Long-range dependencies**: every pair of tokens is one attention hop apart, so distant relationships are easy to learn. **Generality**: the architecture makes almost no assumptions about language specifically — it is a general mechanism for modelling relationships in sequences (and sets), which is why the same design transferred to images, audio, protein folding, and more. The Transformer is less a translation model than a universal relationship-modelling engine.
+
+## A tour through the data flow
+
+Let us trace a single translation, "the cat sat" into French, through the whole model, since seeing the data move makes the architecture click. The three source tokens are looked up in the embedding table and scaled, then positional encodings are added so each carries its index. This sequence enters the encoder, where across six layers every token mixes with every other through self-attention and is transformed by feed-forward networks. Out the top comes the **memory**: three vectors that encode the full bidirectional meaning of the source.
+
+Now the decoder starts generating. It begins with a start token, embedded and positionally encoded. In each decoder layer, this runs through masked self-attention (it can only see what it has generated so far), then cross-attention into the encoder memory (here it consults "cat" to translate it), then a feed-forward network. The final vector is projected to vocabulary logits, softmaxed, and the most likely token — say "le" — is emitted. That token is appended, and the whole decoder runs again to produce "chat," then "s'est," and so on until an end token appears. The encoder ran once; the decoder ran once per output token. This asymmetry — encode in parallel, decode step by step — is the rhythm of every encoder-decoder Transformer.
+
+## The variants that followed
+
+The 2017 architecture was a starting point, and the years since refined nearly every detail while keeping the skeleton intact. The activation in the feed-forward network moved from ReLU to GELU and then to gated variants like SwiGLU. Normalization moved from post-norm to pre-norm, and LayerNorm gained a lighter cousin, RMSNorm. Absolute sinusoidal positions gave way to relative schemes like RoPE and ALiBi. Multi-head attention spawned multi-query and grouped-query variants to shrink the KV cache. None of these changes altered the fundamental idea — stacks of masked attention and feed-forward blocks with residual connections — but together they make modern Transformers train more stably, run faster, and stretch to far longer contexts. When you read a new model's technical report, you will recognize it as this architecture with a specific menu of these refinements selected.
+
+## The Transformer beyond NLP
+
+It is easy to think of the Transformer as a language model, but its reach is the strongest evidence of its generality. **Vision Transformers** chop an image into patches, treat each patch as a token, and apply the same encoder — matching or beating convolutional networks. In audio, Transformers power speech recognition and generation. In biology, AlphaFold uses attention to predict protein structure from amino-acid sequences. In reinforcement learning, the Decision Transformer reframes control as sequence modelling. Multimodal models feed text, image, and audio tokens into one shared Transformer. The reason a single architecture spans such different domains is that attention makes no assumption about *what* the tokens are — it only models relationships among them. Give it a sequence (or even a set) of vectors and it will learn how they relate. That domain-agnostic relationship modelling, far more than any language-specific feature, is why the Transformer became the default architecture of modern AI.
+
+## Computational cost at a glance
+
+A quick accounting of where the compute goes clarifies why scaling Transformers is both possible and expensive. Two costs dominate. The **attention** cost is quadratic in sequence length and linear in model dimension — `O(n² · d)` — because of the `n × n` score matrix. The **feed-forward** cost is linear in sequence length but quadratic in the FFN expansion — roughly `O(n · d · d_ff)` — and since `d_ff` is typically four times `d_model`, the feed-forward sublayers actually consume more compute than attention at short and moderate sequence lengths.
+
+This split has practical consequences. For ordinary sentence-length inputs, the model is FFN-bound, and the way to make models more capable is to widen and deepen them — more parameters in the feed-forward blocks. For very long contexts, the quadratic attention term eventually overtakes everything, which is why long-context research focuses on making attention cheaper rather than the feed-forward networks. Knowing which term dominates your regime tells you which optimization will actually help. It is also why the parameter count and the inference cost can scale differently: a model can have most of its parameters in feed-forward weights while most of its long-context *latency* comes from attention and the growing KV cache. The architecture is fixed and elegant, but its cost profile shifts with how you use it, and matching the optimization to the regime is a recurring theme of the applied phase ahead.
+
+## Code Example
+
+The code assembles a complete Transformer from PyTorch's building blocks, embeds source and target, runs them through the model, and projects to vocabulary logits — the full forward pass of the architecture.
+
+<CodeBlock lang="python" filename="full_transformer.py" code={`# full_transformer.py
+# pip install torch
+import torch
+import torch.nn as nn
+
+class Transformer(nn.Module):
+    def __init__(self, vocab, d_model=512, n_heads=8, d_ff=2048, n_layers=6):
+        super().__init__()
+        self.src_emb = nn.Embedding(vocab, d_model)
+        self.tgt_emb = nn.Embedding(vocab, d_model)
+        self.core = nn.Transformer(
+            d_model=d_model, nhead=n_heads,
+            num_encoder_layers=n_layers, num_decoder_layers=n_layers,
+            dim_feedforward=d_ff, batch_first=True,
+        )
+        self.out = nn.Linear(d_model, vocab)
+        self.out.weight = self.tgt_emb.weight    # weight tying
+
+    def forward(self, src, tgt):
+        n = tgt.size(1)
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(n)
+        memory_src = self.src_emb(src)
+        memory_tgt = self.tgt_emb(tgt)
+        dec = self.core(memory_src, memory_tgt, tgt_mask=tgt_mask)
+        return self.out(dec)                     # (batch, tgt_len, vocab)
+
+torch.manual_seed(0)
+vocab = 10000
+model = Transformer(vocab)
+src = torch.randint(0, vocab, (1, 9))            # source token ids
+tgt = torch.randint(0, vocab, (1, 7))            # target token ids (shifted)
+logits = model(src, tgt)
+
+print("logits shape:", tuple(logits.shape))      # (1, 7, 10000)
+n_params = sum(p.numel() for p in model.parameters())
+print("total parameters:", f"{n_params:,}")
+print("config: d_model=512, heads=8, d_ff=2048, N=6")
+
+# Expected:
+# logits shape: (1, 7, 10000)
+# total parameters: ~44,000,000  (varies with vocab/tying)
+# config: d_model=512, heads=8, d_ff=2048, N=6
+`} />
+
+The output is a distribution over the vocabulary for each of the seven target positions — exactly what you train with cross-entropy and sample from at inference. This single class, configured as above, is the architecture from the 2017 paper. Everything in Phase 3 — BERT, GPT, T5, and the giant language models — is this design scaled up, masked differently, or split into encoder-only and decoder-only halves.
+
+<PaperLink
+  title="Attention Is All You Need"
+  authors="Vaswani, Shazeer, Parmar, Uszkoreit, Jones, Gomez, Kaiser, Polosukhin"
+  year={2017}
+  venue="NeurIPS"
+  url="https://arxiv.org/abs/1706.03762"
+/>
+
+<KeyTakeaways phase={2}>
+- The **Transformer replaces recurrence with attention**, enabling full parallelism and direct long-range connections.
+- It is an **encoder-decoder** model: the encoder builds bidirectional source representations; the decoder generates the target with masked self-attention and cross-attention.
+- **Embeddings + positional encoding** frame the input; a **linear + softmax** head (often weight-tied) produces vocabulary probabilities.
+- Training minimizes **cross-entropy**, with a **warmup learning-rate schedule** and **label smoothing** that trades perplexity for better generalization.
+- Original config: `d_model=512, h=8, d_ff=2048, N=6`, ~65M parameters; it set translation records with far less compute than recurrent models.
+- It works because of **parallelism, long-range dependencies, and generality** — the same design now powers models thousands of times larger.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What was the key architectural claim of 'Attention Is All You Need'?",
+    options: ["Attention should be added to LSTMs", "Recurrence and convolution can be removed entirely; attention alone suffices", "Bigger vocabularies solve translation", "CNNs are best for sequences"],
+    correctIndex: 1,
+    explanation: "The Transformer dispensed with recurrence and convolution, building a state-of-the-art sequence model from self-attention and feed-forward layers alone — enabling parallel training and better long-range modelling."
+  },
+  {
+    question: "Why does label smoothing help even though it worsens perplexity?",
+    options: ["It speeds up training", "It prevents overconfidence, improving generalization and calibration (e.g. translation BLEU)", "It removes the need for a decoder", "It reduces the vocabulary size"],
+    correctIndex: 1,
+    explanation: "Label smoothing spreads a little probability mass off the correct token, so the model is less overconfident. This slightly raises perplexity but improves downstream quality and calibration."
+  },
+  {
+    question: "What three properties best explain the Transformer's success?",
+    options: ["Small size, low cost, simple math", "Parallelism, long-range dependency modelling, and generality", "Recurrence, convolution, and pooling", "Bigger vocabulary, more layers, more dropout"],
+    correctIndex: 1,
+    explanation: "No recurrence means full parallelism; every token is one attention hop from every other for long-range dependencies; and the design is general enough to transfer far beyond translation."
+  }
+]} />
+
+## What's Next
+
+We have the architecture, but we glossed over one input detail: how is the text actually split into tokens before embedding? In **Tokenization — BPE, WordPiece & SentencePiece**, we open up the subword tokenizers that feed every modern Transformer, and you will implement Byte-Pair Encoding from scratch.

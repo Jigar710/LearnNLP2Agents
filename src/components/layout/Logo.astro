@@ -1,0 +1,43 @@
+---
+// Text-only wordmark: NLP → Agents
+---
+
+<span class="logo">
+  <span class="logo-text">
+    <span class="logo-learn">Learn</span><span class="logo-nlp">NLP</span><span class="logo-arrow">→</span><span class="logo-agents">Agents</span>
+  </span>
+</span>
+
+<style>
+  .logo {
+    display: inline-flex;
+    align-items: center;
+  }
+  .logo-text {
+    font-family: var(--font-display);
+    font-size: 19px;
+    line-height: 1;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    letter-spacing: -0.02em;
+  }
+  .logo-learn {
+    font-weight: 400;
+    color: var(--text-muted);
+  }
+  .logo-nlp,
+  .logo-agents {
+    font-weight: 800;
+    color: var(--text-primary);
+  }
+  .logo-arrow {
+    font-weight: 700;
+    background: linear-gradient(90deg, var(--phase-1), var(--phase-2) 50%, var(--phase-5));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+</style>

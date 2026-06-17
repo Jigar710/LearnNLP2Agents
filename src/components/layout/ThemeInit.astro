@@ -1,0 +1,32 @@
+---
+/**
+ * ThemeInit — FOUC-preventing dark-mode bootstrap (PRD §17 Step 2.3 / F2).
+ *
+ * Renders a blocking inline <script> that runs BEFORE the page paints, so the
+ * correct theme is applied with no flash of the wrong color scheme.
+ *
+ * Resolution order:
+ *   1. localStorage("nlp2agents-theme")  ("dark" | "light")
+ *   2. OS preference via prefers-color-scheme
+ *
+ * Place this as the FIRST thing inside <head> in BaseLayout.
+ * `is:inline` keeps it un-hoisted/un-bundled so it executes synchronously here.
+ */
+---
+<script is:inline>
+  (function () {
+    try {
+      var stored = localStorage.getItem("nlp2agents-theme");
+      var theme =
+        stored === "dark" || stored === "light"
+          ? stored
+          : window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+      document.documentElement.setAttribute("data-theme", theme);
+    } catch (e) {
+      document.documentElement.setAttribute("data-theme", "light");
+    }
+  })();
+</script>

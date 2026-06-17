@@ -1,0 +1,178 @@
+---
+title: "LangGraph — Stateful Multi-step Agents"
+subtitle: "Cyclic, stateful graph execution for complex agent workflows"
+phase: 5
+topicNumber: 43
+slug: "langgraph"
+readingTime: 16
+prerequisites: ["langchain"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+
+export const topic = getTopicBySlug('langgraph');
+
+<TopicHero topic={topic} />
+
+LangChain's pipes are perfect for linear flows — retrieve, prompt, generate. But agents are not linear: they loop, branch on conditions, maintain state across many steps, and sometimes pause for human input. Expressing that as a chain quickly becomes painful. **LangGraph** is built for exactly this: it models an agent as a *graph* of nodes connected by edges, where the flow can cycle, branch, and carry evolving state. It is the framework of choice for serious, stateful agents, and it makes the messy control flow of real agents explicit and manageable. This topic covers LangGraph's model — state, nodes, edges, conditional routing, checkpointing — and how to build a stateful agent with it.
+
+Where LangChain composes a pipeline, LangGraph composes a *state machine*. That shift — from a one-directional pipe to a cyclic graph with shared state — is exactly what complex agents need.
+
+## Why linear chains break for agents
+
+A chain runs once, left to right. An agent must **loop** (call a tool, observe, decide again, repeat), **branch** (if the model wants a tool, go to the tool node; if it has an answer, finish), maintain **state** that evolves over many steps, and sometimes **pause** for a human. None of these fit a linear pipe cleanly. You can hack loops into chains, but it gets ugly fast, and the control flow becomes implicit and hard to follow. LangGraph makes the loop, the branches, and the state first-class, so the agent's structure is explicit in the graph.
+
+## Graph-based execution: nodes, edges, state
+
+LangGraph models an agent as a **graph**. **Nodes** are functions that do work — call the model, run a tool, process results — each taking the current state and returning an update to it. **Edges** connect nodes, defining what runs next. **Conditional edges** route dynamically based on the state (e.g. "if the model requested a tool, go to the tool node; otherwise go to END"). And a shared **State** object flows through every node, accumulating the agent's evolving information. Critically, edges can form **cycles** — a node can route back to an earlier one — which is what makes the agent loop. Unlike a DAG (which LangChain chains essentially are), LangGraph graphs can cycle, and cycles are the essence of agency.
+
+<Callout type="tip">
+The key mental shift: a LangChain chain is a directed acyclic graph (it flows one way and stops). A LangGraph graph can have cycles — nodes that route back — which is exactly what lets an agent loop: think, act, observe, then route back to think again.
+</Callout>
+
+## StateGraph and the State object
+
+You build a LangGraph agent with a **StateGraph**. First you define the **State**, typically a `TypedDict` describing the data that flows through the graph — for an agent, usually the list of messages so far, plus any task-specific fields. Each node is a Python function that receives the state and returns a partial update (LangGraph merges updates into the state, with special handling for accumulating lists like message history). You add nodes, connect them with edges, set the entry point, and compile the graph into a runnable agent. The State is the single source of truth that every node reads and updates.
+
+## Conditional edges and the agent loop
+
+The agent loop emerges from a **conditional edge**. After the model node runs, a routing function inspects the state: did the model request a tool? If yes, the edge routes to the tool node, which executes the tool, updates the state with the result, and routes *back* to the model node — the cycle. If no, the model has an answer, and the edge routes to END. This `START → agent → [tool? → tool → agent | done → END]` structure *is* the ReAct loop from Topic 40, expressed as an explicit graph. Making the loop a graph makes it inspectable, modifiable, and extensible.
+
+## Persistence and checkpointing
+
+LangGraph's **checkpointing** is a standout feature. A **checkpointer** (backed by memory, SQLite, or Postgres) saves the graph's state after each step, which enables several powerful capabilities. **Durability**: a long-running agent can survive a crash and resume from its last checkpoint. **Memory across sessions**: a conversation's state persists, so an agent remembers prior turns even after a restart. **Time travel**: you can inspect or roll back to any past state for debugging. Checkpointing turns an agent from an ephemeral run into a persistent, resumable process — essential for production.
+
+## Human-in-the-loop
+
+Because the graph can pause and resume (via checkpointing), LangGraph supports **human-in-the-loop** naturally. You can **interrupt** the graph before or after a node — say, before a node that takes a consequential action — return control to a human for approval or editing, and then resume from exactly where it paused. This is how you build agents that ask for confirmation before sending an email or spending money, the human oversight that production agents require (Topic 48). The pause-and-resume is just a checkpoint with a wait.
+
+## Streaming and production patterns
+
+LangGraph can **stream** intermediate state as the agent works — each node's output, the current step — so a UI can show the agent's progress in real time rather than waiting for the final answer. For complex systems, LangGraph supports production patterns like a **supervisor** node that routes work to specialist subgraphs, and **parallel** branches that run concurrently. These compose into the multi-agent systems of the next topic. The graph model scales from a simple ReAct loop to elaborate multi-agent architectures while keeping the control flow explicit.
+
+## LangGraph vs a simple agent loop
+
+When should you use LangGraph over the from-scratch loop you built in Topic 40? Use the **simple loop** for straightforward agents where you want full control and minimal dependencies — it is transparent and easy to debug. Use **LangGraph** when you need its features: persistence, human-in-the-loop, streaming intermediate state, complex branching, or multi-agent coordination. The graph abstraction earns its keep as agents grow stateful and complex; for a basic tool-using agent, raw code is often simpler. As always, match the tool to the need.
+
+## State design: reducers and channels
+
+The most important design decision in a LangGraph agent is the *shape of its state*, and it rewards thought. The state is a typed structure — usually a `TypedDict` — and each field can have a **reducer** that defines how updates to it combine. The message list, for example, uses an `add_messages` reducer that *appends* new messages rather than overwriting, so the conversation accumulates; a scalar field like "current step" might simply be replaced on each update. Getting these reducers right is what makes state evolve correctly as nodes run: append-only for history, replace for current values, custom logic for anything in between.
+
+Beyond messages, real agents carry richer state — a plan, a scratchpad of intermediate findings, a counter of attempts, flags for whether human approval is pending. Designing this state well is much of designing the agent: it determines what each node can see and update, what persists across the loop, and what the checkpointer saves. A common beginner mistake is to stuff everything into the message list, when separate typed fields would be clearer and easier to reason about — keeping a structured `plan` field is far more legible than burying the plan in a message the agent has to re-parse each step. Think of the state as the agent's working memory schema, and design it deliberately: the nodes are just functions that transform this state, so a clean state design makes for clean, debuggable nodes, while a tangled state makes every node harder to write and reason about.
+
+## Debugging and observing a graph
+
+A real benefit of the explicit graph structure is **observability**: because the agent's control flow is a declared graph and its state is a typed object checkpointed at every step, you can see exactly what happened. You can visualize the graph to confirm the wiring is what you intended, stream each node's output to watch the agent think and act in real time, and — thanks to checkpointing — inspect the full state at any past step to find where things went wrong. This is a sharp contrast to a tangle of nested loops and conditionals in raw code, where the control flow lives implicitly in the call stack and is far harder to follow.
+
+This observability pairs naturally with the tracing tools from the previous topic and Topic 47. When a graph-based agent misbehaves, you do not guess — you replay its trajectory step by step, examine the state at each checkpoint, and localize the failure to a specific node or routing decision. Was the wrong edge taken? Inspect the conditional function's input. Did a tool return garbage? Look at the tool node's output in the state. Did the agent loop forever? Watch the cycle in the trace and find why the exit condition never triggered. The graph turns debugging from archaeology into inspection. For complex stateful agents, this debuggability is arguably as valuable as the execution features, because complex agents *will* misbehave, and the difference between a maintainable system and an unmaintainable one is whether you can see why.
+
+## When LangGraph is overkill
+
+For balance, it is worth being clear about when *not* to reach for LangGraph. The framework's power comes with concepts to learn — state schemas, reducers, nodes, conditional edges, checkpointers — and for a simple agent that just calls a tool or two in a loop, that machinery is more than the problem requires. The from-scratch loop from Topic 40, a few dozen lines you fully understand, is often the better choice for straightforward agents: it has no dependencies, no abstraction to learn, and nothing hidden. Adding a framework to a simple problem can make it harder, not easier.
+
+The signal that you have outgrown the simple loop and should adopt LangGraph is when you find yourself *reimplementing its features*: hand-rolling persistence so an agent can resume, bolting on human-approval pauses, adding complex branching logic, building streaming of intermediate state, or coordinating multiple agents. At that point the framework is encoding patterns you would otherwise build and maintain yourself, badly. The judgment is the same one from the framework debate in the previous topic: adopt the abstraction when it removes real, recurring work, and stay with transparent raw code when it does not. Because you can build the agent loop from scratch, you can make this call deliberately — using LangGraph for the genuinely complex, stateful, production agents it was designed for, and keeping simpler agents simple. That discipline, matching the tool to the actual complexity of the task, is what separates an over-engineered system from a well-engineered one, and it applies as much to agent frameworks as to anything else in software.
+
+## Code Example
+
+The code builds a ReAct agent as a LangGraph StateGraph — a state, an agent node, a tool node, and a conditional edge that creates the loop — with a checkpointer for persistence.
+
+<CodeBlock lang="python" filename="langgraph_agent.py" code={`# langgraph_agent.py
+# pip install langgraph langchain-anthropic
+from typing import Annotated, TypedDict
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
+from langgraph.checkpoint.memory import MemorySaver
+from langchain_anthropic import ChatAnthropic
+from langchain_core.tools import tool
+
+# --- A tool ---
+@tool
+def get_weather(city: str) -> str:
+    """Get the current weather for a city."""
+    return {"Paris": "12C rain", "Tokyo": "22C clear"}.get(city, "unknown")
+
+model = ChatAnthropic(model="claude-opus-4-8").bind_tools([get_weather])
+tools_by_name = {"get_weather": get_weather}
+
+# --- State: messages accumulate via add_messages reducer ---
+class State(TypedDict):
+    messages: Annotated[list, add_messages]
+
+# --- Nodes ---
+def agent_node(state: State):
+    return {"messages": [model.invoke(state["messages"])]}
+
+def tool_node(state: State):
+    last = state["messages"][-1]
+    results = []
+    for call in last.tool_calls:
+        out = tools_by_name[call["name"]].invoke(call["args"])
+        results.append({"role": "tool", "content": str(out),
+                        "tool_call_id": call["id"]})
+    return {"messages": results}
+
+# --- Conditional edge: loop if the model asked for a tool ---
+def should_continue(state: State):
+    return "tools" if state["messages"][-1].tool_calls else END
+
+# --- Build the graph (note the cycle: tools -> agent) ---
+g = StateGraph(State)
+g.add_node("agent", agent_node)
+g.add_node("tools", tool_node)
+g.add_edge(START, "agent")
+g.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
+g.add_edge("tools", "agent")              # <-- the cycle that makes it loop
+app = g.compile(checkpointer=MemorySaver())
+
+# Run with a thread id so state persists across calls
+cfg = {"configurable": {"thread_id": "user-1"}}
+out = app.invoke({"messages": [("user", "Weather in Tokyo?")]}, cfg)
+print(out["messages"][-1].content)
+
+# Expected: agent -> tool (get_weather Tokyo) -> agent -> "It's 22C and clear in Tokyo."
+`} />
+
+The graph makes the agent's structure explicit: `START → agent`, then a conditional edge that either routes to `tools` (and the `tools → agent` edge creates the loop) or to `END`. The `add_messages` reducer accumulates the conversation, and the `MemorySaver` checkpointer persists state per `thread_id`, so the agent remembers across calls. This is the same ReAct loop from Topic 40, but now stateful, persistent, interruptible, and ready to grow into the multi-agent systems ahead.
+
+<KeyTakeaways phase={5}>
+- **LangGraph** models an agent as a **graph** of nodes and edges with shared **state** — built for the loops, branches, and statefulness that linear chains handle poorly.
+- A **StateGraph** has **nodes** (functions that update state), **edges** (flow), **conditional edges** (dynamic routing), and a shared **State** (often a `TypedDict`).
+- Unlike a DAG, LangGraph graphs can **cycle** — a tool node routing back to the agent node *is* the ReAct loop made explicit.
+- **Checkpointing** persists state after each step, enabling durability, cross-session memory, and time-travel debugging.
+- **Human-in-the-loop** is natural via interrupt-and-resume; **streaming** exposes intermediate state for live UIs.
+- Use the **simple loop** for basic agents and **LangGraph** when you need persistence, human-in-the-loop, complex branching, or multi-agent coordination.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What is a checkpointer in LangGraph and why does it matter?",
+    options: ["A way to compress the model", "It saves the graph's state after each step, enabling durability, cross-session memory, and time-travel debugging", "A type of attention", "A tool for tokenization"],
+    correctIndex: 1,
+    explanation: "The checkpointer persists state at each step, so an agent can survive crashes and resume, remember across sessions, and have its past states inspected or rolled back — turning an ephemeral run into a persistent process."
+  },
+  {
+    question: "Why can LangGraph express agents that linear LangChain chains cannot?",
+    options: ["It uses a bigger model", "Its graphs can have cycles (nodes routing back), which lets agents loop — think, act, observe, repeat", "It has no state", "It only does retrieval"],
+    correctIndex: 1,
+    explanation: "A chain is acyclic and flows one way. LangGraph graphs can cycle — e.g. a tool node routing back to the agent node — which is exactly the looping structure agents need."
+  },
+  {
+    question: "How does LangGraph support human-in-the-loop approval?",
+    options: ["It cannot", "By interrupting the graph before/after a node and resuming from the saved checkpoint after human input", "By retraining the model", "By removing tools"],
+    correctIndex: 1,
+    explanation: "Because checkpointing lets the graph pause and resume, you can interrupt before a consequential node, hand control to a human for approval or edits, and then continue from exactly where it paused."
+  }
+]} />
+
+## What's Next
+
+A single agent has limits; complex goals often benefit from *teams* of specialized agents. In **Multi-Agent Systems & Orchestration**, we study how to coordinate multiple agents — supervisors, hierarchies, debates — to solve problems no single agent handles well.

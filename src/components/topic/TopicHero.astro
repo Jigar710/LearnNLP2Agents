@@ -1,0 +1,100 @@
+---
+/**
+ * TopicHero (PRD §10.6 [1] / Step 6.1) — topic page header:
+ * phase badge, Cormorant H1 title, subtitle, meta row (reading time +
+ * prerequisite links), and a thin phase-colored divider.
+ */
+import Badge from '../ui/Badge.astro';
+import { getTopicBySlug, type Topic } from '../../data/curriculum';
+import { withBase } from '../../utils/base';
+
+interface Props {
+  topic: Topic;
+}
+const { topic } = Astro.props;
+const num = String(topic.id).padStart(2, '0');
+const prereqs = topic.prerequisites
+  .map((slug) => getTopicBySlug(slug))
+  .filter((t): t is Topic => Boolean(t));
+---
+
+<header class="topic-hero" style={`--accent: var(--phase-${topic.phase})`}>
+  <Badge phase={topic.phase} label={`Phase ${topic.phase} · Topic ${num}`} size="md" />
+
+  <h1 class="topic-title" data-pagefind-meta="title">{topic.title}</h1>
+  <p class="topic-subtitle">{topic.subtitle}</p>
+
+  <div class="topic-meta">
+    <span class="meta-item">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      {topic.readingTime} min read
+    </span>
+    {
+      prereqs.length > 0 && (
+        <span class="meta-item">
+          <span class="meta-label">Prerequisites:</span>
+          {prereqs.map((p, i) => (
+            <>
+              <a href={withBase(`/topic/${p.slug}`)} class="prereq-link">{p.title}</a>
+              {i < prereqs.length - 1 ? <span class="sep">·</span> : null}
+            </>
+          ))}
+        </span>
+      )
+    }
+  </div>
+
+  <div class="topic-divider"></div>
+</header>
+
+<style>
+  .topic-hero {
+    margin-bottom: 2rem;
+  }
+  .topic-title {
+    font-family: var(--font-serif);
+    font-weight: 400;
+    font-size: clamp(2rem, 5vw, 2.75rem);
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin: 0.75rem 0 0.5rem;
+    color: var(--text-primary);
+  }
+  .topic-subtitle {
+    font-size: 1.1rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    margin: 0 0 1rem;
+  }
+  .topic-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1.25rem;
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+  }
+  .meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .meta-label {
+    color: var(--text-muted);
+  }
+  .prereq-link {
+    color: var(--accent);
+    font-weight: 500;
+  }
+  .sep {
+    color: var(--text-muted);
+    margin: 0 0.1rem;
+  }
+  .topic-divider {
+    height: 3px;
+    width: 64px;
+    margin-top: 1.5rem;
+    border-radius: 9999px;
+    background: var(--accent);
+  }
+</style>

@@ -1,0 +1,192 @@
+---
+title: "Word Embeddings — GloVe & FastText"
+subtitle: "Global co-occurrence and subword embeddings — two powerful alternatives"
+phase: 1
+topicNumber: 7
+slug: "glove-fasttext"
+readingTime: 14
+prerequisites: ["word2vec"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+import PaperLink from '../../components/topic/PaperLink.astro';
+
+export const topic = getTopicBySlug('glove-fasttext');
+
+<TopicHero topic={topic} />
+
+Word2Vec learns embeddings from *local* context windows, one window at a time. Two influential methods take different routes to the same goal of meaning-bearing vectors. **GloVe** steps back and uses the *global* co-occurrence statistics of the whole corpus, combining the strengths of count-based and prediction-based methods. **FastText** zooms in below the word level, representing each word by its character sub-pieces, which lets it handle rare words and even words it never saw in training. Together with Word2Vec, these three are the classic static word embeddings, and knowing when to choose each is a practical skill. This topic covers both, their mathematics, and a head-to-head comparison.
+
+GloVe and FastText each fix a specific Word2Vec weakness — GloVe its blindness to global statistics, FastText its inability to handle unseen words — and understanding those fixes deepens your grasp of what embeddings are actually doing and why the field kept refining them.
+
+## Recap: Word2Vec's two weaknesses
+
+Word2Vec is powerful but has two notable limitations. First, it learns from **local windows only** — it never directly uses the global statistic of how often two words co-occur across the entire corpus, processing one window at a time and implicitly ignoring the big picture. Second, it has **no morphology**: each word is an atomic unit with its own vector, so it cannot exploit that "running," "runner," and "runs" share the root "run," and it cannot represent a word it never saw in training (the out-of-vocabulary problem from Topic 3). GloVe addresses the first by using global statistics; FastText addresses the second by going below the word level. Neither abandons the dense-vector idea from Word2Vec — each extends it from a different angle.
+
+## GloVe: global vectors from co-occurrence
+
+**GloVe** (Global Vectors, Pennington et al. 2014) builds embeddings directly from the corpus-wide **co-occurrence matrix** — a big table counting how often each word appears near each other word. The insight is that *ratios* of co-occurrence probabilities encode meaning. Consider "ice" and "steam": both co-occur with "water," but "ice" co-occurs much more with "solid" and "steam" with "gas." The *ratio* of these co-occurrence probabilities cleanly distinguishes the words, and GloVe trains embeddings so that the dot product of two word vectors approximates the log of their co-occurrence count. This makes GloVe a **log-bilinear** model that fits global statistics directly, rather than scanning local windows. In practice GloVe and Word2Vec produce embeddings of comparable quality; GloVe's appeal is that it uses the full corpus statistics efficiently.
+
+## FastText: subword embeddings
+
+**FastText** (Bojanowski et al. 2017) extends Word2Vec with a crucial twist: it represents each word as a **bag of character n-grams** plus the whole word. The word "where" becomes the n-grams `<wh`, `whe`, `her`, `ere`, `re>` (with boundary markers), and its embedding is the sum of these sub-piece embeddings. This has two big payoffs. First, **morphology**: words sharing sub-pieces (run, running, runner) share n-grams, so their embeddings are related automatically — a huge help for morphologically rich languages. Second, and most importantly, **out-of-vocabulary words**: FastText can build an embedding for a word it never saw in training by composing its n-grams, since even an unseen word is made of familiar sub-pieces. Word2Vec and GloVe simply cannot represent an unseen word; FastText can.
+
+<Callout type="tip">
+FastText's superpower is handling words it never trained on. Because a word's vector is built from its character n-grams, even a brand-new word, a typo, or a rare inflection gets a reasonable embedding from its sub-pieces — impossible for word-level methods like Word2Vec and GloVe.
+</Callout>
+
+## The Mathematics
+
+GloVe's objective fits word-vector dot products to log co-occurrence counts. With `X_ij` the number of times word `j` occurs in the context of word `i`, embeddings `w` and `\tilde{w}`, biases `b`, and a weighting function `f` that down-weights very frequent pairs:
+
+<MathBlock
+  formula="J = \sum_{i,j=1}^{V} f(X_{ij})\left(w_i^\top \tilde{w}_j + b_i + \tilde{b}_j - \log X_{ij}\right)^2"
+  caption="GloVe cost: make the dot product of two word vectors match the log of their co-occurrence count, weighted by f."
+/>
+
+FastText's word representation is the sum of its subword (character n-gram) vectors. If `G_w` is the set of n-grams for word `w` and `z_g` the vector for n-gram `g`, the word's vector is:
+
+<MathBlock
+  formula="v_w = \sum_{g \in G_w} z_g"
+  caption="FastText: a word's embedding is the sum of its character-n-gram embeddings — enabling subword sharing and OOV vectors."
+/>
+
+This simple sum is what lets FastText compose a vector for any string, seen or unseen, from its character pieces.
+
+## When to use Word2Vec vs GloVe vs FastText
+
+Each has a niche. **Word2Vec** is fast, simple, and a strong default for general English text with a fixed vocabulary. **GloVe** is similar in quality and convenient because high-quality pre-trained vectors are widely available; it shines when you want to leverage global corpus statistics. **FastText** is the clear choice when you face rare words, morphologically rich languages, typos, or out-of-vocabulary terms — anywhere sub-word structure matters. In modern practice, all three are largely superseded by contextual embeddings (BERT) and subword-tokenized LLMs, but the *ideas* persist: GloVe's global statistics, FastText's subwords (which directly anticipate the BPE tokenization of Topic 18).
+
+<ComparisonTable
+  phase={1}
+  headers={["Aspect", "Word2Vec", "GloVe", "FastText"]}
+  rows={[
+    ["Learns from", "Local context windows", "Global co-occurrence matrix", "Local windows + subwords"],
+    ["Unit", "Whole words", "Whole words", "Character n-grams + word"],
+    ["Handles OOV words", "No", "No", "Yes (from subwords)"],
+    ["Morphology", "No", "No", "Yes (shared n-grams)"],
+    ["Best for", "General text, speed", "Leveraging global stats", "Rare words, rich morphology"],
+  ]}
+  caption="Three classic static embeddings and their trade-offs."
+/>
+
+## Pre-trained embeddings, fine-tuning, and bias
+
+You rarely train embeddings from scratch; you download **pre-trained** vectors (GloVe vectors trained on Wikipedia + Gigaword, FastText vectors for 157 languages) and use them directly. You can also **fine-tune** them on your domain by continuing training, though with small data it is often safer to keep them frozen. One important caveat: embeddings learn whatever is in the data, including **bias**. Trained on human text, they absorb human stereotypes — the classic finding that `man : computer_programmer :: woman : homemaker` falls out of the analogy arithmetic. This is not a quirk but a reflection of biased training data, and it carries forward into modern models. Being aware that embeddings encode societal bias is essential for using them responsibly, and it is a concern that only grows as these representations feed into ever larger and more consequential systems.
+
+<Callout type="warning" title="Embeddings encode bias">
+Word embeddings learn the statistical regularities of their training text, including harmful stereotypes about gender, race, and more. These biases propagate into any system built on them. Auditing and mitigating embedding bias is an active and important area, not an afterthought.
+</Callout>
+
+## The co-occurrence ratio intuition
+
+GloVe's central insight deserves a closer look, because it is elegant and easy to miss in the equations. Raw co-occurrence *probabilities* are noisy and dominated by very frequent words, but co-occurrence *ratios* turn out to carry clean semantic signal. Take the words "ice" and "steam" and probe them with various context words. With "solid," ice co-occurs much more than steam, so the ratio P(solid | ice) / P(solid | steam) is large. With "gas," it is the reverse, so the ratio is small. With "water," both co-occur a lot, so the ratio is near 1; with an unrelated word like "fashion," both co-occur little, and the ratio is again near 1.
+
+So the *ratio* discriminates exactly the dimension that distinguishes ice from steam — their relationship to states of matter — while washing out words that are equally related or unrelated to both. GloVe is designed so that vector differences capture these ratios: the relationship between two words is encoded in how their vectors relate to a third probe word. This is why GloVe vectors support the same analogy arithmetic as Word2Vec — the linear structure that makes `king − man + woman ≈ queen` work falls out of fitting these co-occurrence ratios. Seeing this connection clarifies that GloVe and Word2Vec, despite their different training procedures (global matrix factorization versus local window prediction), are really two routes to the same destination: a vector space where meaning and relationships are encoded as geometry. They were even shown to be mathematically related under certain assumptions, which is why their results are so similar in practice.
+
+## From static to contextual: the bridge ahead
+
+It is worth placing all three classic embeddings — Word2Vec, GloVe, FastText — in the arc of the curriculum, because they sit at a pivotal transition. They are all **static** embeddings: each word (or in FastText's case, each string) gets a fixed vector, computed once and frozen, that cannot change with context. This was a revolutionary advance over Bag-of-Words, proving that meaning could be learned as geometry from raw text with no labels, and these vectors powered a generation of NLP systems as the input layer to models for classification, translation, and more.
+
+But the static limitation — one vector per word regardless of context — is exactly what the next phase of the field set out to overcome. The story from here runs through sequence models (Phase 1's remaining topics), which process embeddings in order and begin to make representations context-dependent, and culminates in the Transformer and BERT (Phase 2), where a word's representation is computed *dynamically* from its entire sentence. FastText's subword idea, meanwhile, flows directly into the BPE and WordPiece tokenizers (Topic 18) that feed every modern LLM. So these three methods are not a dead end but a foundation: the dense-vector representation they pioneered is still the substrate of everything downstream, refined from a fixed lookup table into the contextual, subword-aware representations of modern models. Understanding them well — what they capture, where they fall short, and why — is understanding the soil from which the rest of NLP grew, and it makes the leap to contextual models in Phase 2 feel like a natural next step rather than a discontinuity.
+
+## Code Example
+
+The code loads pre-trained GloVe vectors via gensim and demonstrates FastText's killer feature — producing a vector for an out-of-vocabulary word from its subwords.
+
+<CodeBlock lang="python" filename="glove_fasttext.py" code={`# glove_fasttext.py
+# pip install gensim
+import gensim.downloader as api
+from gensim.models import FastText
+from gensim.utils import simple_preprocess
+
+# --- GloVe: load pre-trained vectors and query them ---
+glove = api.load("glove-wiki-gigaword-50")    # 50-d GloVe (downloads once)
+print("GloVe most similar to 'king':", glove.most_similar("king", topn=3))
+print("GloVe analogy king - man + woman:",
+      glove.most_similar(positive=["king", "woman"], negative=["man"], topn=1))
+
+# --- FastText: train a small model and handle an OOV word ---
+sentences = [simple_preprocess(s) for s in [
+    "the runner was running in the running race",
+    "she runs and he ran while they were running",
+]]
+ft = FastText(sentences, vector_size=50, window=3, min_count=1, epochs=50)
+
+# 'runnable' was NEVER in the training data — FastText builds it from n-grams
+oov = "runnable"
+print(f"\\n'{oov}' in vocabulary?", oov in ft.wv.key_to_index)   # False
+print(f"FastText vector for OOV '{oov}' (first 5):",
+      ft.wv[oov][:5].round(3))                                    # still works!
+print(f"nearest known word to '{oov}':", ft.wv.most_similar(oov, topn=2))
+
+# Expected:
+# GloVe most similar to 'king': [('prince', 0.82), ('queen', 0.78), ...]
+# GloVe analogy king - man + woman: [('queen', 0.85)]
+# 'runnable' in vocabulary? False
+# FastText vector for OOV 'runnable' (first 5): [ ... real numbers ... ]
+# nearest known word to 'runnable': [('running', 0.6), ('runner', 0.5)]
+`} />
+
+The GloVe section shows pre-trained vectors solving the classic analogy out of the box. The FastText section demonstrates the decisive difference: the word "runnable" never appeared in training, yet FastText produces a sensible vector for it from its character n-grams (shared with "running" and "runner") — something Word2Vec and GloVe fundamentally cannot do. This subword composition is a direct ancestor of the BPE tokenization that every modern LLM uses, which we study in Topic 18. The lineage is worth pausing on: the insight that meaning can be assembled from sub-word pieces, first made practical at scale by FastText, is exactly what lets today's models gracefully handle any word in any language, however rare or novel, without an out-of-vocabulary failure.
+
+<PaperLink
+  title="GloVe: Global Vectors for Word Representation"
+  authors="Pennington, Socher, Manning"
+  year={2014}
+  venue="EMNLP"
+  url="https://nlp.stanford.edu/pubs/glove.pdf"
+/>
+
+<PaperLink
+  title="Enriching Word Vectors with Subword Information (FastText)"
+  authors="Bojanowski, Grave, Joulin, Mikolov"
+  year={2017}
+  venue="TACL"
+  url="https://arxiv.org/abs/1607.04606"
+/>
+
+<KeyTakeaways phase={1}>
+- **GloVe** learns embeddings from the **global co-occurrence matrix**, fitting word-vector dot products to log co-occurrence counts — combining count-based and prediction-based strengths.
+- **FastText** represents each word as a **sum of character n-gram vectors**, giving it morphology awareness and, crucially, the ability to embed **out-of-vocabulary** words.
+- Word2Vec and GloVe **cannot** represent unseen words; FastText **can**, by composing them from subwords — a direct ancestor of BPE tokenization.
+- **Choose**: Word2Vec for speed/simplicity, GloVe for global stats and convenient pre-trained vectors, FastText for rare words and morphologically rich languages.
+- You usually use **pre-trained** embeddings; fine-tune cautiously on small data.
+- Embeddings **encode the bias** of their training text (gender, race stereotypes), which propagates downstream — awareness and mitigation matter.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "When would you choose FastText over GloVe?",
+    options: ["Never", "When you need to handle rare words, morphologically rich languages, typos, or out-of-vocabulary terms — FastText composes vectors from subwords", "Only for English", "When you want the smallest model"],
+    correctIndex: 1,
+    explanation: "FastText represents words by character n-grams, so it handles morphology and can embed words it never saw in training. GloVe (and Word2Vec) cannot represent unseen words."
+  },
+  {
+    question: "What is GloVe's key idea compared to Word2Vec?",
+    options: ["It uses no training", "It learns from the global co-occurrence matrix of the whole corpus, fitting vector dot products to log co-occurrence counts, rather than only local windows", "It uses subwords", "It needs labels"],
+    correctIndex: 1,
+    explanation: "GloVe uses corpus-wide co-occurrence statistics directly (a log-bilinear model), whereas Word2Vec learns from one local context window at a time. Their quality is comparable."
+  },
+  {
+    question: "How can FastText produce a vector for a word it never saw in training?",
+    options: ["It guesses randomly", "It sums the embeddings of the word's character n-grams, which are shared with known words", "It skips the word", "It uses a bigger vocabulary"],
+    correctIndex: 1,
+    explanation: "A FastText word vector is the sum of its character-n-gram vectors. An unseen word still consists of familiar n-grams, so FastText composes a sensible embedding from those sub-pieces."
+  }
+]} />
+
+## What's Next
+
+Embeddings represent individual words, but language is *sequences*, and a key task is assigning probabilities to whole sequences. In **Language Modeling & Perplexity**, we study how to model the probability of text, the n-gram models that started it all, and perplexity — the metric for measuring how well a model predicts language.

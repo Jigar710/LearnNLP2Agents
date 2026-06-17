@@ -1,0 +1,196 @@
+---
+title: "Tool Use & Function Calling"
+subtitle: "Connecting LLMs to the real world through structured tool interfaces"
+phase: 5
+topicNumber: 41
+slug: "tool-use-function-calling"
+readingTime: 15
+prerequisites: ["react-pattern"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('tool-use-function-calling');
+
+<TopicHero topic={topic} />
+
+ReAct's "Action" step depends on the model reliably choosing the right tool and supplying valid arguments. **Function calling** (also called tool use) is the structured mechanism that makes this dependable: you describe your tools with a schema, the model returns a *structured* request to call one with specific arguments, your code executes it, and the result goes back to the model. This turns the fragile "parse the model's text to find the action" of early agents into a robust, validated interface — and it is the single capability that most directly turns a language model into an agent. This topic covers how function calling works, how to design good tools, and the security that real tool use demands.
+
+Function calling is the API beneath every modern agent. Whether you use raw model APIs or a framework, you are defining tools and handling tool calls, so understanding it precisely is essential.
+
+## What is function calling?
+
+**Function calling** lets an LLM request that your code run a specific function with specific arguments. You provide the model a list of available tools, each described by a name, a description, and a JSON-Schema definition of its parameters. When the model decides a tool would help, instead of replying with text it returns a structured **tool call**: the tool's name and a JSON object of arguments matching the schema. Your code executes the function and returns the result, which the model reads and continues from. The model never runs code itself — it *requests* calls, and your harness decides whether and how to fulfill them.
+
+## How it works
+
+The flow has four parts. You **define** tools as schemas. You **send** them with the user's message. The model **selects** a tool and produces arguments conforming to the schema (the model is trained to emit valid structured calls). Your code **executes** the tool and returns the result, and the model incorporates it. Crucially, the schema constrains the model's output to valid, parseable arguments — no brittle regex parsing of free text. The model "knows" which tool to call because the descriptions tell it what each does, and it matches the user's need to the most relevant tool, much as a developer reads docs to pick a function.
+
+<Callout type="tip">
+The tool's description is its most important field. The model chooses tools based almost entirely on their descriptions, so write them like documentation for a competent colleague: what the tool does, when to use it, and what each parameter means.
+</Callout>
+
+## Defining tools
+
+A tool definition has three parts: a clear **name**, a **description** of what it does and when to use it, and a **parameter schema** (JSON Schema) defining each argument's type, meaning, and whether it is required. The schema does double duty — it tells the model how to call the tool *and* validates the arguments before execution. Good schemas use descriptive parameter names and include descriptions for non-obvious fields. The quality of these definitions directly determines how reliably the model uses the tools.
+
+## Parallel function calling
+
+Modern models support **parallel tool calls**: in a single turn, the model can request several independent tools at once. Asked "compare the weather in Paris and Tokyo," the model can call the weather tool twice in parallel rather than sequentially, and your harness runs both and returns both results together. This cuts latency for independent actions. Your loop must handle a *list* of tool calls per turn, executing each and returning all results before the model continues.
+
+## Tool categories and Anthropic vs OpenAI
+
+Tools span broad categories: **retrieval** (search, database queries), **execution** (run code, shell commands), **external APIs** (weather, payments, email), and **data** (read/write files, query systems). Both major providers support tool use with similar structure but different field names and conventions.
+
+<ComparisonTable
+  phase={5}
+  headers={["Aspect", "Anthropic (Claude)", "OpenAI (GPT)"]}
+  rows={[
+    ["Tool field", "<code>tools=[...]</code> with <code>input_schema</code>", "<code>tools=[...]</code> with <code>parameters</code>"],
+    ["Model's call", "<code>tool_use</code> content block", "<code>tool_calls</code> in the message"],
+    ["Returning result", "<code>tool_result</code> with <code>tool_use_id</code>", "<code>role: tool</code> with <code>tool_call_id</code>"],
+    ["Stop signal", "<code>stop_reason == 'tool_use'</code>", "<code>finish_reason == 'tool_calls'</code>"],
+    ["Parallel calls", "Supported", "Supported"],
+  ]}
+  caption="The two major tool-use APIs share structure but differ in field names."
+/>
+
+## Tool design best practices
+
+Well-designed tools make reliable agents. Give tools **clear, specific names** and **detailed descriptions** — the model selects on these. Keep each tool **focused** on one job rather than a kitchen-sink tool with many modes. Make **inputs simple and well-typed**, and **outputs concise and informative** (return what the model needs to reason, not a wall of raw data). **Return useful errors** so the model can recover. And **limit the toolset** — too many tools confuse the model's selection, so expose only what the task needs.
+
+## Handling errors and retries
+
+Tools fail: APIs time out, inputs are invalid, services are down. Robust agents **catch tool errors and return them as observations** so the model can react ("that failed, let me try a different input") instead of crashing. Add **retries with backoff** for transient failures, **validate inputs** before executing, and **set timeouts** so a hung tool does not freeze the agent. The harness's error handling is what makes an agent dependable in the messy real world.
+
+## Security: the critical concern
+
+Tool use gives an LLM the ability to *act*, which makes security paramount. **Sandboxing**: code-execution and shell tools must run in an isolated environment (a container, a restricted VM) so the model cannot damage your system or access secrets. **Input validation**: never pass model-generated arguments directly to dangerous operations — validate and constrain them. **Prompt injection**: if a tool returns content from an untrusted source (a web page, a user document), that content can contain instructions trying to hijack the agent; treat tool outputs as untrusted data, not commands. **Least privilege**: give each tool only the minimum access it needs. **Human approval**: for consequential actions (sending money, deleting data, emailing customers), require explicit human confirmation. These are not optional — an agent with unsandboxed code execution and no input validation is a serious vulnerability.
+
+<Callout type="danger" title="Treat tool outputs as untrusted">
+Content returned by tools — especially from the web or user files — can contain prompt-injection attacks that try to redirect your agent. Never let tool output silently override your instructions, and require human approval for irreversible or sensitive actions.
+</Callout>
+
+## MCP and standardized tool interfaces
+
+As tool use matured, a problem emerged: every application redefined the same tools — a file reader, a database query, a search — in its own bespoke way, and connecting an agent to a new system meant writing new tool glue each time. The **Model Context Protocol (MCP)** addresses this by standardizing how applications expose tools and context to LLMs. Instead of hand-coding each integration, a system implements an MCP server that advertises its tools in a standard format, and any MCP-compatible agent can discover and use them. It is, roughly, a universal adapter between agents and the tools and data they need.
+
+The value of standardization here mirrors the value of standardization anywhere in software: reuse and composability. A team that builds an MCP server for their internal database makes it instantly usable by any agent that speaks the protocol, rather than re-implementing the integration per application. As the agent ecosystem grows, these standards matter more, because the number of possible agent-tool connections grows combinatorially, and a shared protocol turns an N-times-M integration problem into N-plus-M. You do not need MCP to build agents — the raw tool-use API in this topic is enough — but knowing it exists frames where the ecosystem is heading: toward agents that can plug into a growing universe of standardized tools and data sources without bespoke glue for each, much as web standards let any browser talk to any server.
+
+## When the model should not use a tool
+
+A subtle skill in tool use is the model knowing when *not* to call a tool. A well-built agent answers simple questions directly from its own knowledge rather than reflexively reaching for a tool, and it avoids calling tools whose results it does not actually need. Over-eager tool use wastes latency and money and can introduce errors — calling a search for a fact the model already knows reliably, or running a calculator for trivial arithmetic, adds steps without value. Conversely, *under*-using tools is the more dangerous failure: a model that should have looked something up but instead hallucinated an answer from stale internal knowledge.
+
+The balance is shaped by both the model and your tool descriptions. Descriptions that clearly state *when* a tool is appropriate ("use this only for current data the assistant cannot know") help the model decide. So does the broader instruction context: telling the agent to prefer authoritative tools for facts that may have changed, while answering stable general knowledge directly, calibrates its behaviour. Capable models are increasingly good at this judgment, but it remains something to evaluate and tune, because the right tool-use *rate* — neither too eager nor too reluctant — is part of what makes an agent feel competent rather than either slow and fussy or confidently wrong. Watching an agent's tool-call patterns in its traces, and adjusting descriptions and instructions accordingly, is a concrete and high-value tuning loop.
+
+## Building robust custom tools
+
+Most of an agent's power comes from the *custom* tools you build for your domain, so a few principles for writing them well are worth stating. A good tool is **idempotent where possible** (calling it twice with the same input does no extra harm), returns **structured, concise output** the model can reason over, **fails loudly but recoverably** with informative error messages, and **does one well-defined thing**. Tools that wrap external systems should handle that system's quirks internally — retries, pagination, rate limits — so the model sees a clean interface rather than raw API messiness.
+
+Think of tool design as designing an API for a capable but literal-minded consumer. The model will use the tool exactly as described and will be confused by ambiguity, surprised by side effects, and unable to recover from cryptic errors. So the documentation (the description and schema) must be precise, the behaviour must be predictable, and the failure modes must be legible. The investment pays off directly: in agent systems, the reliability of the whole often hinges on the reliability and clarity of a handful of custom tools, because a single flaky or confusingly-described tool can derail otherwise-sound reasoning. Treating your tools with the same care you would give a public API — clear contracts, good errors, no surprising side effects — is one of the highest-leverage things you can do to make an agent dependable, and it is the foundation the frameworks of the next topics build upon.
+
+## Code Example
+
+The code builds a multi-tool agent with weather and calculator tools, handling parallel calls and tool errors, using Anthropic's tool-use API.
+
+<CodeBlock lang="python" filename="tool_use.py" code={`# tool_use.py
+# pip install anthropic
+import os
+from anthropic import Anthropic
+
+client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+# --- Tool implementations ---
+def get_weather(city):
+    return {"Paris": "12C rain", "Tokyo": "22C clear"}.get(city, "unknown")
+
+def calculator(expression):
+    try:
+        return str(eval(expression, {"__builtins__": {}}))   # sandbox in prod!
+    except Exception as e:
+        return f"Error: {e}"                                   # error -> observation
+
+REGISTRY = {"get_weather": get_weather, "calculator": calculator}
+
+# --- Tool schemas (name + description + JSON Schema) ---
+TOOLS = [
+    {"name": "get_weather", "description": "Get current weather for a city.",
+     "input_schema": {"type": "object",
+        "properties": {"city": {"type": "string", "description": "City name"}},
+        "required": ["city"]}},
+    {"name": "calculator", "description": "Evaluate an arithmetic expression.",
+     "input_schema": {"type": "object",
+        "properties": {"expression": {"type": "string"}}, "required": ["expression"]}},
+]
+
+def agent(task, max_turns=5):
+    messages = [{"role": "user", "content": task}]
+    for _ in range(max_turns):
+        resp = client.messages.create(
+            model="claude-opus-4-8", max_tokens=600, tools=TOOLS, messages=messages)
+        messages.append({"role": "assistant", "content": resp.content})
+        if resp.stop_reason != "tool_use":
+            return "".join(b.text for b in resp.content if b.type == "text")
+        # Handle ALL tool calls this turn (supports parallel calls)
+        results = []
+        for b in resp.content:
+            if b.type == "tool_use":
+                fn = REGISTRY.get(b.name)
+                out = fn(**b.input) if fn else f"Unknown tool: {b.name}"
+                results.append({"type": "tool_result",
+                                "tool_use_id": b.id, "content": str(out)})
+        messages.append({"role": "user", "content": results})
+    return "Max turns reached."
+
+print(agent("What's 15% of 240, and what's the weather in Tokyo?"))
+
+# Expected: the model calls calculator(expression='240*0.15') AND
+# get_weather(city='Tokyo') in parallel, then answers:
+# "15% of 240 is 36, and the weather in Tokyo is 22C and clear."
+`} />
+
+The agent handles a request needing two different tools — and the model calls them in *parallel* in one turn, which the loop processes by iterating over all `tool_use` blocks and returning all results together. The `REGISTRY` dispatches by name, errors become observations rather than crashes, and `max_turns` bounds the loop. This registry-plus-loop pattern, with the security practices above, is the foundation of every production tool-using agent.
+
+<KeyTakeaways phase={5}>
+- **Function calling** lets the model return a *structured* request to call a tool with schema-validated arguments — robust, not brittle text parsing.
+- Define tools with a **name, description, and JSON-Schema parameters**; the **description** is what the model uses to choose the right tool.
+- **Parallel tool calls** let the model request several independent tools in one turn; the harness runs all and returns the results together.
+- Both **Anthropic and OpenAI** support tool use with similar structure but different field names (`input_schema`/`tool_use` vs `parameters`/`tool_calls`).
+- Design tools to be **focused, well-typed, concise in output, and few in number**; **catch errors and return them as observations** for recovery.
+- **Security is critical**: sandbox execution, validate inputs, treat tool outputs (especially web/user content) as untrusted to resist **prompt injection**, apply least privilege, and require human approval for consequential actions.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "How does the LLM 'know' which tool to call?",
+    options: ["It runs each tool and checks", "It matches the user's need to the tools' names and especially their descriptions, then emits a schema-valid call", "It calls tools at random", "The user specifies the tool every time"],
+    correctIndex: 1,
+    explanation: "The model selects a tool based on the names and descriptions you provide, much like a developer reading docs, and produces arguments conforming to the tool's JSON schema."
+  },
+  {
+    question: "Why should tool outputs (especially from the web or user files) be treated as untrusted?",
+    options: ["They are always slow", "They can contain prompt-injection attacks that try to hijack the agent's instructions", "They use too many tokens", "They are encrypted"],
+    correctIndex: 1,
+    explanation: "Untrusted content returned by a tool may include text crafted to override the agent's instructions. Treat tool output as data, never let it silently redirect the agent, and require human approval for sensitive actions."
+  },
+  {
+    question: "What is the main advantage of schema-based function calling over parsing the model's free text?",
+    options: ["It is cheaper", "The schema constrains the model to emit valid, parseable arguments and validates them — far more robust than regex parsing", "It removes the need for tools", "It works without a model"],
+    correctIndex: 1,
+    explanation: "Defining tools with a JSON schema makes the model produce structured, validated tool calls, eliminating the fragility of extracting actions and arguments from unstructured text."
+  }
+]} />
+
+## What's Next
+
+You can build agents from scratch with raw tool use — but frameworks accelerate development with reusable abstractions. In **LangChain Framework Deep Dive**, we study the most popular LLM application framework, its composable building blocks, and when its abstractions help versus when raw control is better.

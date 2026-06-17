@@ -1,0 +1,184 @@
+---
+title: "Positional Encoding"
+subtitle: "Giving the Transformer a sense of position"
+phase: 2
+topicNumber: 14
+slug: "positional-encoding"
+readingTime: 13
+prerequisites: ["self-attention"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+
+export const topic = getTopicBySlug('positional-encoding');
+
+<TopicHero topic={topic} />
+
+Self-attention has a glaring blind spot we flagged in Topic 12: it is **permutation-invariant**. Because it computes outputs as weighted sums over the whole sequence, shuffling the input tokens just shuffles the outputs — "dog bites man" and "man bites dog" look identical to the raw mechanism. Yet word order is fundamental to meaning. Positional encoding is the elegant fix: before attention runs, we add information about each token's position directly into its representation, so the model knows not just *what* each token is but *where* it sits.
+
+This topic covers the original sinusoidal positional encoding from the Transformer paper, explains why its designers chose sinusoids of geometrically increasing wavelengths, and surveys the learned and relative alternatives — BERT's learned embeddings, and RoPE and ALiBi, which dominate modern large language models. You will implement sinusoidal encoding from scratch and visualize the striking pattern it produces.
+
+## The permutation-invariance problem
+
+Let us be precise about the problem. Self-attention computes each output as `sum_j A_ij v_j`. A sum does not care about the order of its terms, and the attention weights `A_ij` depend only on the *content* of tokens `i` and `j`, not on their positions. So if you permute the input tokens, you permute the queries, keys, and values identically, and you get the same outputs in a permuted order. The mechanism literally cannot tell "the cat chased the dog" from "the dog chased the cat" — both are the same multiset of token vectors.
+
+Recurrent networks never had this problem, because they consume tokens one at a time, so position was implicit in the order of processing. Self-attention traded that implicit ordering for parallelism and direct long-range connections. Positional encoding buys the ordering back without giving up those advantages.
+
+## What positional encoding adds
+
+The idea is simple: construct a vector for each *position* — a vector that encodes "I am position 0," "I am position 1," and so on — and add it to the token's content embedding. After the addition, a token's vector carries both meaning and location, so when attention compares queries and keys, position can influence the result. Crucially, the position vector must have the same dimension as the token embedding (so they can be summed), and it should let the model recover both absolute position and, ideally, relative distances between tokens.
+
+<Callout type="tip">
+Positional information is *added* to embeddings, not concatenated. Summing keeps the dimension fixed and lets the model learn to separate or combine content and position as needed through its projection matrices.
+</Callout>
+
+## Sinusoidal positional encoding
+
+The original Transformer used a fixed, hand-designed scheme: sinusoids of many different frequencies. Each dimension of the positional vector is a sine or cosine wave, and the wavelength grows geometrically across dimensions — short, fast-oscillating waves in the early dimensions and long, slow waves in the later ones. A position is thus encoded as a unique combination of phases across all these waves, much like how a set of clock hands of different speeds uniquely identifies a moment in time.
+
+This design has three attractive properties. It assigns every position a unique encoding; it produces values bounded in [−1, 1] regardless of how long the sequence is; and — most elegantly — it lets the model attend by *relative* position, because the encoding of position `pos + k` is a fixed linear function of the encoding of position `pos`. The model can learn "attend three tokens back" as a single linear operation that works at any absolute position.
+
+## The Mathematics
+
+For position `pos` and embedding dimension index `i`, the sinusoidal encoding uses sine for even dimensions and cosine for odd dimensions:
+
+<MathBlock
+  formula="PE(pos, 2i) = \sin\!\left(\frac{pos}{10000^{\,2i/d_{model}}}\right)"
+  caption="Even dimensions: a sine wave whose frequency decreases as the dimension index i increases."
+/>
+
+<MathBlock
+  formula="PE(pos, 2i+1) = \cos\!\left(\frac{pos}{10000^{\,2i/d_{model}}}\right)"
+  caption="Odd dimensions: the matching cosine wave at the same frequency."
+/>
+
+The term `10000^{2i/d_model}` is the wavelength control: for small `i` (early dimensions) the denominator is near 1, giving high-frequency waves that change rapidly with position; for large `i` (later dimensions) the denominator is huge, giving very low-frequency waves that barely change across the whole sequence. Together they span scales from one token to thousands.
+
+The relative-position property follows from the trigonometric angle-addition identities. Because `sin(a+b)` and `cos(a+b)` expand into linear combinations of `sin a`, `cos a`, `sin b`, `cos b`, the encoding of `pos + k` can be written as a rotation (a fixed linear map depending only on `k`) of the encoding of `pos`:
+
+<MathBlock
+  formula="PE(pos + k) = M_k \cdot PE(pos)"
+  caption="Shifting position by k is a fixed linear transform M_k — enabling relative attention."
+/>
+
+This is the mathematical reason sinusoidal encoding generalizes: the *relationship* between positions has a clean, position-independent form.
+
+## Why not just use a position index?
+
+A natural question: why not feed the model the raw integer position, or a single normalized number from 0 to 1? Raw integers grow without bound and destabilize training; normalized positions change meaning when the sequence length changes (position 0.5 is token 5 in a 10-token sentence but token 50 in a 100-token one). The sinusoidal scheme avoids both pitfalls — bounded values, consistent meaning, and a built-in notion of relative distance — which a single scalar index cannot provide.
+
+<Callout type="info" title="Fixed vs learned: a genuine choice">
+Sinusoidal encodings are computed, not learned — they cost no parameters and extrapolate to lengths unseen in training. Learned positional embeddings (below) can fit the training distribution slightly better but do not extrapolate. The original paper reported the two performed almost identically.
+</Callout>
+
+## Learned and relative alternatives
+
+Sinusoidal encoding is not the only option, and modern models often use others.
+
+**Learned positional embeddings** (used by BERT and GPT-2) treat each position like a word: a lookup table maps position 0, 1, 2, ... to a trainable vector, learned end-to-end. Simple and effective, but limited to the maximum length seen in training — they cannot represent a position beyond the table.
+
+**Relative positional encodings** encode the *distance* between tokens rather than their absolute positions, which often matches language better ("the adjective two words to my left"). T5 adds learned scalar biases to attention scores based on relative distance. **RoPE (Rotary Position Embedding)**, used in LLaMA and many recent models, rotates the query and key vectors by an angle proportional to position, so their dot product naturally depends on relative position and extrapolates gracefully. **ALiBi** simply adds a distance-proportional penalty to attention scores, with no positional vectors at all, and extrapolates to far longer sequences than seen in training. These methods are why today's models handle long contexts far better than the original sinusoidal design.
+
+## A clock analogy
+
+A helpful way to picture sinusoidal encoding is a bank of clocks. Imagine a row of clock hands, each spinning at a different speed: one completes a full turn every 2 positions, the next every 4, then every 8, and so on up to hands that take thousands of positions to come around. To read off "what position am I at?", you note the angle of every hand. No single hand uniquely identifies the position — the fast hand repeats constantly — but the *combination* of all the hand angles is unique for a very long range, exactly as hours, minutes, and seconds together pinpoint a moment that none could alone.
+
+That is precisely what the geometric spread of wavelengths does. The fast, low-dimension sinusoids distinguish neighbouring positions with fine resolution, while the slow, high-dimension sinusoids provide the coarse, large-scale sense of "early in the sequence" versus "late." The model's attention can consult whichever frequencies are useful for a given relationship: fine hands for local syntax, slow hands for document-scale structure. The binary representation of integers works the same way — the low bit flips every step, the high bit flips rarely — and sinusoidal encoding is essentially a smooth, continuous version of that binary code.
+
+## Positional encoding and length generalization
+
+One reason positional encoding matters so much in practice is **length generalization**: can a model trained on short sequences handle longer ones at inference? This is a live problem, because training on very long sequences is expensive (remember the quadratic cost), yet real applications — summarizing a book, analyzing a long codebase — demand long contexts.
+
+The positional scheme is often the bottleneck. Learned positional embeddings simply have no vector for positions beyond the training table, so they fail hard past their maximum length. Sinusoidal encodings are defined for any position and degrade more gracefully, but the model still may not have *learned* how to use positions it never saw. This is exactly why relative schemes rose to prominence. ALiBi's distance penalty and RoPE's rotations were explicitly designed so that a model trained on, say, 2,048 tokens can extrapolate to many times that length with far less degradation. When you read that a new model supports a 128,000-token context, the positional encoding is a large part of how that was achieved — and how earlier models, capped by learned position tables, could not.
+
+## Absolute versus relative: which to choose
+
+It is worth stepping back to compare the two philosophies. **Absolute** encodings (sinusoidal, learned) tell each token its position in the sequence: "I am token 7." **Relative** encodings (T5 biases, RoPE, ALiBi) instead shape attention by the *distance* between tokens: "the key is 3 positions to the left of the query." Language tends to care about relative relationships — agreement between a subject and a verb depends on their separation, not their absolute indices — which is the intuition behind the shift toward relative methods.
+
+For learning purposes, the absolute sinusoidal scheme is the clearest place to understand *why* position must be injected at all, which is why we implement it here. For building modern systems, you will most often reach for a relative method, especially RoPE, because it combines strong quality with the long-context extrapolation that absolute schemes lack. The conceptual takeaway is constant across all of them: attention by itself sees only content, so position must be supplied, and *how* you supply it quietly determines how far your model can read. One more practical note: in encoder-decoder and decoder-only Transformers, the positional signal is applied once, at the bottom of the stack, and then flows upward through every layer via the residual connections you will meet in the next topic. The model does not re-inject position at each layer; it learns to preserve and transform the positional information it received at the input, which is part of why residual connections — paths that let the original signal pass through largely intact — turn out to be so important for Transformers to work at all.
+
+## Code Example
+
+The code implements sinusoidal positional encoding exactly as in the formulas and plots the resulting matrix, where you can see the high-frequency early dimensions and low-frequency later ones.
+
+<CodeBlock lang="python" filename="positional_encoding.py" code={`# positional_encoding.py
+# pip install numpy matplotlib
+import numpy as np
+import matplotlib.pyplot as plt
+
+def positional_encoding(max_len, d_model):
+    pos = np.arange(max_len)[:, None]                 # (max_len, 1)
+    i = np.arange(d_model)[None, :]                    # (1, d_model)
+    # wavelength term 10000^(2*(i//2)/d_model)
+    denom = np.power(10000, (2 * (i // 2)) / d_model)
+    angles = pos / denom                               # (max_len, d_model)
+    pe = np.zeros((max_len, d_model))
+    pe[:, 0::2] = np.sin(angles[:, 0::2])              # even dims -> sin
+    pe[:, 1::2] = np.cos(angles[:, 1::2])              # odd dims  -> cos
+    return pe
+
+pe = positional_encoding(max_len=50, d_model=64)
+print("PE shape:", pe.shape)                           # (50, 64)
+print("value range:", round(pe.min(), 2), "to", round(pe.max(), 2))  # ~ -1 to 1
+
+# Each position gets a unique 64-d vector; nearby positions are similar.
+sim = pe[10] @ pe[12] / (np.linalg.norm(pe[10]) * np.linalg.norm(pe[12]))
+far = pe[10] @ pe[40] / (np.linalg.norm(pe[10]) * np.linalg.norm(pe[40]))
+print(f"cos(pos10, pos12) = {sim:.3f}   cos(pos10, pos40) = {far:.3f}")
+
+plt.imshow(pe, aspect="auto", cmap="RdBu")
+plt.xlabel("embedding dimension"); plt.ylabel("position")
+plt.title("Sinusoidal positional encoding")
+plt.savefig("pe.png", dpi=120)
+
+# Expected:
+# PE shape: (50, 64)
+# value range: -1.0 to 1.0
+# cos(pos10, pos12) = 0.97   cos(pos10, pos40) = 0.31
+`} />
+
+The cosine-similarity check makes the key property concrete: nearby positions (10 and 12) have very similar encodings, while distant positions (10 and 40) are much less similar. The model can read distance directly from how aligned two position vectors are. The saved image shows the characteristic banded pattern — rapidly alternating colours in the low dimensions, smooth gradients in the high ones — that is the fingerprint of geometrically spaced sinusoids.
+
+<KeyTakeaways phase={2}>
+- Self-attention is **permutation-invariant**; positional encoding injects order so the model can tell "dog bites man" from "man bites dog."
+- Position vectors are **added** to token embeddings (same dimension), so each token carries both content and location.
+- **Sinusoidal encoding** uses sine/cosine waves of geometrically increasing wavelength; it is parameter-free, bounded, and lets shifting position by k be a fixed linear transform (relative attention).
+- A single scalar index fails because raw integers are unbounded and normalized indices change meaning with length.
+- **Learned embeddings** (BERT) fit training but do not extrapolate; **relative** schemes (T5, RoPE, ALiBi) encode distance and power modern long-context models.
+- The choice of positional scheme is a major lever for **long-context** performance.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Why is sinusoidal positional encoding often preferred over a single learned position index?",
+    options: ["It uses more parameters", "It is bounded, consistent across lengths, and supports relative positions via a fixed linear shift", "It removes the need for attention", "It makes the model permutation-invariant"],
+    correctIndex: 1,
+    explanation: "Sinusoids give bounded values, the same meaning regardless of sequence length, and the property that shifting by k is a fixed linear transform — enabling relative attention. A raw or normalized scalar index has none of these."
+  },
+  {
+    question: "How is positional information combined with token embeddings?",
+    options: ["Concatenated, doubling the dimension", "Added element-wise, keeping the dimension fixed", "Multiplied element-wise", "Used to reorder the tokens"],
+    correctIndex: 1,
+    explanation: "The positional vector has the same dimension as the embedding and is added to it, so each token's vector encodes both content and position without changing the dimensionality."
+  },
+  {
+    question: "What problem does positional encoding solve?",
+    options: ["The vanishing gradient problem", "Self-attention's permutation invariance — its inability to perceive word order", "The out-of-vocabulary problem", "Softmax saturation"],
+    correctIndex: 1,
+    explanation: "Self-attention treats the input as an unordered set. Positional encoding injects position so the model can use word order, which carries meaning."
+  }
+]} />
+
+## What's Next
+
+We now have all three ingredients — self-attention, multi-head attention, and positional encoding. It is time to assemble them. In **Transformer Encoder**, you will stack these pieces with residual connections and layer normalization into the encoder block that powers BERT and the understanding side of every Transformer.

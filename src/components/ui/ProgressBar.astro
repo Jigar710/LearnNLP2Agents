@@ -1,0 +1,52 @@
+---
+/**
+ * ProgressBar (PRD §11.10 / Step 6.11) — thin colored progress bar used in the
+ * sidebar and on the curriculum page.
+ */
+interface Props {
+  value: number; // 0–100
+  phase?: number; // 1–5 for color; omits to a phase-1→5 gradient
+  height?: number; // px
+  showLabel?: boolean;
+}
+const { value, phase, height = 8, showLabel = false } = Astro.props;
+const pct = Math.max(0, Math.min(100, value));
+const fill = phase
+  ? `var(--phase-${phase})`
+  : 'linear-gradient(90deg, var(--phase-1), var(--phase-5))';
+---
+
+<div class="progress" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+  <div class="progress-track" style={`height:${height}px`}>
+    <div class="progress-fill" style={`width:${pct}%;background:${fill}`}></div>
+  </div>
+  {showLabel && <span class="progress-label">{Math.round(pct)}%</span>}
+</div>
+
+<style>
+  .progress {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+  }
+  .progress-track {
+    flex: 1;
+    background: var(--border-color);
+    border-radius: 9999px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    border-radius: 9999px;
+    transition: width 300ms ease;
+  }
+  .progress-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    min-width: 2.5em;
+    text-align: right;
+  }
+</style>

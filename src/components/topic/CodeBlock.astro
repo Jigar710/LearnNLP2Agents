@@ -1,0 +1,158 @@
+---
+/**
+ * CodeBlock (PRD §11.1 / Step 6.2) — Shiki-highlighted code with a filename
+ * tab, language badge, and copy-to-clipboard button. Always dark background
+ * (even in light mode), per the spec.
+ */
+import { Code } from 'astro:components';
+
+interface Props {
+  code: string;
+  lang?: string;
+  filename?: string;
+  showLineNumbers?: boolean;
+}
+const { code, lang = 'python', filename, showLineNumbers = false } = Astro.props;
+const trimmed = code.replace(/\n$/, '');
+---
+
+<figure class:list={['code-block', { 'with-line-numbers': showLineNumbers }]}>
+  <figcaption class="code-head">
+    {filename ? <span class="code-filename">{filename}</span> : <span class="code-filename code-filename--empty" />}
+    <span class="code-tools">
+      <span class="code-lang">{lang}</span>
+      <button type="button" class="code-copy" aria-label="Copy code">
+        <svg class="i-copy" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <svg class="i-check" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+        <span class="code-copy-label">Copy</span>
+      </button>
+    </span>
+  </figcaption>
+  <div class="code-body">
+    <Code code={trimmed} lang={lang as any} theme="github-dark" />
+  </div>
+</figure>
+
+<style>
+  .code-block {
+    margin: 1.5rem 0;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #1e1e2e;
+  }
+  .code-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.4rem 0.5rem 0.4rem 0.9rem;
+    background: #181825;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .code-filename {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: #cdd6f4;
+  }
+  .code-filename--empty {
+    height: 1em;
+  }
+  .code-tools {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .code-lang {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #9399b2;
+    padding: 2px 7px;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .code-copy {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 3px 9px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: transparent;
+    color: #cdd6f4;
+    font-size: 0.72rem;
+    cursor: pointer;
+    transition: background 150ms ease, border-color 150ms ease;
+  }
+  .code-copy:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .code-copy .i-check {
+    display: none;
+    color: #a6e3a1;
+  }
+  .code-copy.is-copied .i-copy {
+    display: none;
+  }
+  .code-copy.is-copied .i-check {
+    display: inline;
+  }
+
+  .code-body {
+    overflow-x: auto;
+  }
+  .code-body :global(pre.astro-code) {
+    margin: 0;
+    padding: 1rem 1.1rem;
+    background: #1e1e2e !important;
+    font-size: 0.875rem;
+    line-height: 1.65;
+  }
+  .code-body :global(code) {
+    font-family: var(--font-mono);
+    background: transparent;
+    padding: 0;
+    font-size: inherit;
+  }
+
+  /* Optional line numbers (PRD §11.1) */
+  .with-line-numbers .code-body :global(code) {
+    counter-reset: line;
+  }
+  .with-line-numbers .code-body :global(.line) {
+    counter-increment: line;
+  }
+  .with-line-numbers .code-body :global(.line)::before {
+    content: counter(line);
+    display: inline-block;
+    width: 1.6em;
+    margin-right: 1.1em;
+    text-align: right;
+    color: #6c7086;
+    user-select: none;
+  }
+</style>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>('.code-copy').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const block = btn.closest('.code-block');
+      const codeEl = block?.querySelector('pre.astro-code');
+      const text = codeEl ? (codeEl as HTMLElement).innerText : '';
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        return;
+      }
+      btn.classList.add('is-copied');
+      const label = btn.querySelector('.code-copy-label');
+      if (label) label.textContent = 'Copied';
+      setTimeout(() => {
+        btn.classList.remove('is-copied');
+        if (label) label.textContent = 'Copy';
+      }, 2000);
+    });
+  });
+</script>

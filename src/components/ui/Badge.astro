@@ -1,0 +1,37 @@
+---
+/**
+ * Badge (PRD §11.9 / Step 6.10) — phase-colored pill used in heroes and cards.
+ */
+interface Props {
+  phase?: number; // 1–5; omit for a neutral badge
+  label: string;
+  size?: 'sm' | 'md';
+}
+const { phase, label, size = 'md' } = Astro.props;
+const accent = phase ? `var(--phase-${phase})` : 'var(--text-secondary)';
+---
+
+<span class:list={['badge', `badge-${size}`]} style={`--c: ${accent}`}>{label}</span>
+
+<style>
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    border-radius: 9999px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    color: var(--c);
+    background: color-mix(in srgb, var(--c) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+  }
+  .badge-sm {
+    font-size: 0.68rem;
+    padding: 3px 8px;
+  }
+  .badge-md {
+    font-size: 0.78rem;
+    padding: 4px 11px;
+  }
+</style>

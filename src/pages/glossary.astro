@@ -1,0 +1,92 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { GLOSSARY } from '../data/glossary';
+import { getTopicBySlug } from '../data/curriculum';
+import { withBase } from '../utils/base';
+
+const sorted = [...GLOSSARY].sort((a, b) => a.term.localeCompare(b.term));
+const groups = new Map<string, typeof sorted>();
+for (const e of sorted) {
+  const L = e.term[0].toUpperCase();
+  if (!groups.has(L)) groups.set(L, []);
+  groups.get(L)!.push(e);
+}
+const letters = [...groups.keys()];
+---
+<BaseLayout title="Glossary" description="100+ NLP, LLM, and agent terms defined." accent="var(--phase-4)">
+  <div class="gloss">
+    <header class="gloss-head">
+      <h1 class="gloss-title">Glossary</h1>
+      <p class="gloss-sub">{GLOSSARY.length} key terms across NLP, Transformers, LLMs, RAG, and agents.</p>
+      <input id="gloss-search" class="gloss-search" type="search" placeholder="Filter terms…" aria-label="Filter glossary terms" />
+      <nav class="gloss-index" aria-label="Jump to letter">
+        {letters.map((L) => <a href={`#g-${L}`}>{L}</a>)}
+      </nav>
+    </header>
+
+    <div id="gloss-body">
+      {letters.map((L) => (
+        <section class="gloss-section" id={`g-${L}`} data-letter={L}>
+          <h2 class="gloss-letter">{L}</h2>
+          {groups.get(L)!.map((e) => (
+            <article class="gloss-entry" data-term={e.term.toLowerCase()} data-def={e.definition.toLowerCase()}>
+              <h3 class="gloss-term">{e.term}</h3>
+              <p class="gloss-def">{e.definition}</p>
+              {e.relatedTopics.length > 0 && (
+                <div class="gloss-pills">
+                  {e.relatedTopics.map((slug) => {
+                    const t = getTopicBySlug(slug);
+                    return t ? <a class="gloss-pill" href={withBase(`/topic/${slug}`)}>{t.title}</a> : null;
+                  })}
+                </div>
+              )}
+            </article>
+          ))}
+        </section>
+      ))}
+      <p id="gloss-empty" class="gloss-empty" hidden>No terms match your filter.</p>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .gloss { max-width: 820px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+  .gloss-head { margin-bottom: 2rem; }
+  .gloss-title { font-family: var(--font-serif); font-weight: 400; font-size: clamp(2rem, 5vw, 3rem); margin: 0 0 0.4rem; }
+  .gloss-sub { color: var(--text-secondary); margin: 0 0 1.2rem; }
+  .gloss-search { width: 100%; padding: 0.7rem 1rem; border: 1px solid var(--border-color); border-radius: 9999px; background: var(--bg-secondary); color: var(--text-primary); font-size: 0.95rem; }
+  .gloss-search:focus { outline: none; border-color: var(--accent); }
+  .gloss-index { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 1rem; }
+  .gloss-index a { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); background: var(--bg-secondary); border: 1px solid var(--border-color); }
+  .gloss-index a:hover { border-color: var(--accent); color: var(--accent); }
+
+  .gloss-section { margin-bottom: 1.5rem; }
+  .gloss-letter { font-family: var(--font-serif); font-size: 1.8rem; color: var(--accent); border-bottom: 1px solid var(--border-color); padding-bottom: 0.2rem; margin: 1.5rem 0 1rem; }
+  .gloss-entry { padding: 0.9rem 0; border-bottom: 1px solid var(--border-subtle); }
+  .gloss-term { font-size: 1.02rem; font-weight: 600; margin: 0 0 0.3rem; }
+  .gloss-def { font-size: 0.9rem; color: var(--text-secondary); line-height: 1.6; margin: 0 0 0.5rem; }
+  .gloss-pills { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .gloss-pill { font-size: 0.72rem; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 2px 9px; border-radius: 9999px; }
+  .gloss-pill:hover { color: #fff; background: var(--accent); }
+  .gloss-empty { text-align: center; color: var(--text-muted); padding: 2rem; }
+</style>
+
+<script>
+  const input = document.getElementById('gloss-search') as HTMLInputElement | null;
+  const empty = document.getElementById('gloss-empty');
+  input?.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    let visible = 0;
+    document.querySelectorAll<HTMLElement>('.gloss-section').forEach((sec) => {
+      let shown = 0;
+      sec.querySelectorAll<HTMLElement>('.gloss-entry').forEach((e) => {
+        const match = !q || (e.dataset.term || '').includes(q) || (e.dataset.def || '').includes(q);
+        e.style.display = match ? '' : 'none';
+        if (match) shown++;
+      });
+      sec.style.display = shown ? '' : 'none';
+      visible += shown;
+    });
+    if (empty) empty.hidden = visible > 0;
+  });
+</script>

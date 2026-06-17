@@ -1,0 +1,169 @@
+---
+title: "LLM Evolution — GPT-2, GPT-3, GPT-4 & Claude"
+subtitle: "From 117M to over a trillion parameters — the scaling revolution"
+phase: 3
+topicNumber: 21
+slug: "llm-evolution"
+readingTime: 15
+prerequisites: ["gpt-autoregressive-lm"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('llm-evolution');
+
+<TopicHero topic={topic} />
+
+In Topic 20 you learned the GPT recipe: a decoder-only Transformer trained to predict the next token. This topic tells what happened when researchers asked a deceptively simple question — *what if we make it bigger?* The answer reshaped computing. Across five years, language models grew from 117 million parameters to well over a trillion, and somewhere along that curve they stopped being clever autocomplete and started writing essays, code, and proofs, learning new tasks from a handful of examples. Understanding this scaling story is essential context for everything in Phase 3.
+
+We will trace the lineage — GPT-2, GPT-3, InstructGPT and ChatGPT, GPT-4, and the open-source and Claude families — and pull out the recurring lessons: that scale unlocks qualitatively new abilities, that in-context learning emerged rather than being designed, and that raw capability had to be paired with alignment before these models became genuinely useful. The code shows how to call modern models through their APIs, including the latest Claude models.
+
+## GPT-2: the zero-shot shock (2019)
+
+GPT-2 scaled the original GPT to 1.5 billion parameters and trained it on a large, curated slice of the web. Its headline result was *zero-shot* generalization: without any task-specific training, it could perform reading comprehension, translation, and summarization just by being prompted appropriately. OpenAI initially declined to release the largest model, citing misuse concerns — a sign that capabilities had crossed a threshold that made people nervous. GPT-2's fluency made clear that next-token prediction at scale was learning far more than surface statistics.
+
+## GPT-3: few-shot learning emerges (2020)
+
+GPT-3 was a hundredfold leap to **175 billion** parameters, and it revealed the ability that would define the era: **in-context (few-shot) learning**. Provide a few examples of a task in the prompt and GPT-3 performs it — no gradient updates, no fine-tuning. The same frozen model could translate, answer trivia, do arithmetic, and write code, with the task chosen entirely by the prompt. This was not explicitly trained; it *emerged* from scale. GPT-3 turned language models from components you fine-tune into general-purpose engines you instruct, and it kicked off the modern LLM gold rush.
+
+## InstructGPT and ChatGPT: alignment makes it useful (2022)
+
+Raw GPT-3 was powerful but unruly — it would continue text rather than answer questions, and it could be unhelpful, untruthful, or toxic. The fix was **alignment**: fine-tuning the model on human demonstrations and preferences so it follows instructions and behaves well. InstructGPT applied reinforcement learning from human feedback (RLHF, Topic 26) to GPT-3, and the aligned model was preferred by humans over the raw model *despite being 100× smaller*. ChatGPT packaged this into a conversational interface in late 2022 and reached a hundred million users faster than any product in history. The lesson: capability without alignment is not enough; the two together are what made LLMs broadly useful.
+
+<Callout type="info" title="Alignment can beat raw scale">
+Human raters preferred a 1.3B-parameter InstructGPT over the 175B raw GPT-3. Teaching a model to follow intent mattered more than making it bigger. Alignment is the subject of Topics 25-27.
+</Callout>
+
+## GPT-4 and the multimodal turn (2023)
+
+GPT-4 pushed capability further — stronger reasoning, far better reliability on hard benchmarks, and *multimodality* (it could see images, not just read text). OpenAI disclosed almost nothing about its size or architecture, marking a shift toward closed, competitive frontier models. GPT-4 passed professional exams, wrote sophisticated code, and reasoned through multi-step problems that stumped its predecessors, cementing LLMs as general-purpose tools rather than novelties.
+
+## The open-source boom and Anthropic's Claude
+
+Two countercurrents shaped the field alongside the closed frontier models. First, an **open-source boom**: Meta's LLaMA family, along with Mistral, Falcon, Gemma, and Qwen, put capable models in everyone's hands, enabling local deployment, fine-tuning, and research. Open models a fraction of GPT-3's size now rival it, thanks to better data and training (the Chinchilla lessons of Topic 24).
+
+Second, **Anthropic's Claude** family pioneered a different alignment philosophy, **Constitutional AI**, in which the model critiques and revises its own outputs against a written set of principles rather than relying solely on large amounts of human preference labeling. The most recent Claude models — including Claude Opus 4.8, Sonnet 4.6, and Haiku 4.5, alongside Fable 5 — are designed for strong reasoning, coding, and agentic tool use, the capabilities Phase 5 builds on. When you build applications in this curriculum, defaulting to the latest and most capable models gives you the best results.
+
+<ComparisonTable
+  phase={3}
+  headers={["Model", "Year", "Scale / note", "Defining capability"]}
+  rows={[
+    ["GPT-2", "2019", "1.5B params", "Zero-shot generalization"],
+    ["GPT-3", "2020", "175B params", "Few-shot in-context learning"],
+    ["InstructGPT / ChatGPT", "2022", "RLHF-aligned GPT-3.5", "Instruction following, dialogue"],
+    ["GPT-4", "2023", "Undisclosed, multimodal", "Strong reasoning, vision"],
+    ["LLaMA / Mistral / Gemma", "2023+", "Open weights, 7B-70B+", "Local, fine-tunable, efficient"],
+    ["Claude (4.x family)", "2024+", "Constitutional AI", "Reasoning, coding, agentic tool use"],
+  ]}
+  caption="A rough timeline of the LLM scaling era."
+/>
+
+## Emergent abilities: when more becomes different
+
+The most striking phenomenon of the scaling era is **emergence**: abilities that are essentially absent in smaller models and then appear, sometimes abruptly, past a certain scale. A small model scores at chance on multi-step arithmetic, word unscrambling, or chained logical reasoning; scale it up and, beyond some threshold, performance jumps from near-zero to useful. The ability was not gradually improving and finally crossing a usefulness bar — on many measurements it looked flat, then turned on.
+
+Chain-of-thought reasoning is the canonical example. Asking a small model to "think step by step" does little, because it cannot sustain a coherent chain. Ask a large model the same and accuracy on math and logic problems leaps, because the capacity to maintain and manipulate intermediate steps only exists above a certain scale. Researchers catalogued dozens of such emergent abilities across benchmarks, and emergence is a major reason the field kept pouring resources into bigger models: you could not always predict *which* new capability the next scale-up would unlock, only that some would appear. We will examine emergence critically in Topic 24, including the argument that some "emergence" is partly an artifact of how we measure it — but the practical reality stands, that qualitatively new behaviours show up with scale.
+
+## What scaling actually changed (and what it didn't)
+
+It is worth being precise about what grew. The *architecture* barely changed across the generations. GPT-2, GPT-3, and GPT-4 are, in essence, the same decoder-only Transformer you built in Topic 16 — stacks of masked self-attention and feed-forward blocks with residual connections. There was no secret new mechanism. What changed was **scale along three axes simultaneously**: the number of parameters, the amount of training data, and the compute spent training. GPT-3 had more layers, wider feed-forward networks, more attention heads, and far more tokens of training text than GPT-2, but each individual component is one you already understand.
+
+This is a profound and slightly unsettling point. The capabilities that feel qualitatively new — reasoning, in-context learning, coding — arose not from a cleverer design but from running the *same* design much larger on much more data. It means the bitter lesson of the field, that general methods leveraging computation tend to win over hand-crafted cleverness, held once again. It also means the knowledge you have built in Phases 1 and 2 is not made obsolete by frontier models; those models *are* that knowledge, scaled. When you read that a new model has hundreds of billions of parameters, you should picture exactly the architecture from Topic 17, simply wider and deeper, trained longer.
+
+## The cost, access, and openness shift
+
+Scaling reshaped the economics and politics of NLP. Training a frontier model came to cost tens or hundreds of millions of dollars in compute, putting it beyond the reach of all but a few well-funded labs. This concentrated frontier capability and pushed leading labs toward secrecy — GPT-4's technical report disclosed essentially nothing about its size or training, a sharp break from the open papers of the GPT-2 and GPT-3 era.
+
+The counter-movement was the open-weights ecosystem. Meta's decision to release the LLaMA models, followed by Mistral, Falcon, Gemma, Qwen, and others, meant that organizations and individuals could run capable models on their own hardware, fine-tune them on private data, inspect their behaviour, and build without per-token API fees or vendor lock-in. The quality gap between open and closed models narrowed dramatically, largely because the open community absorbed the Chinchilla insight (Topic 24) that smaller models trained on far more data can match much larger ones. Today a practitioner chooses along a spectrum: closed frontier APIs for maximum capability and convenience, open models for control, privacy, and cost. Much of the engineering in Phases 3 and 4 — quantization, parameter-efficient fine-tuning, efficient serving — exists precisely to make these large models practical to adapt and run outside the largest labs.
+
+## How to choose a model today
+
+For someone building applications now, the menu is rich, and a few principles help. First, **default to the most capable current models** when quality matters, because capability improvements compound through every step of a complex system — a smarter base model makes prompting, retrieval, and agents all work better with less effort. For Anthropic that means the latest Claude family: Opus-tier models for the hardest reasoning and coding, Sonnet-tier for a strong balance of quality and speed, and Haiku-tier for cheap, high-volume tasks.
+
+Second, **match the model to the task's difficulty**. Routing simple, high-volume requests to a smaller, faster model and reserving the largest model for genuinely hard requests is a standard cost-optimization pattern (Topic 48). Third, **consider open versus closed** based on your constraints: privacy-sensitive data, the need to fine-tune deeply, or strict cost ceilings push toward open models you host yourself, while convenience and frontier capability push toward hosted APIs. Finally, **track the frontier**, because it moves fast — model ids and capabilities change on the order of months, and a system designed around a year-old model is often leaving large, free gains on the table. The scaling story is not finished; treating model choice as a living decision rather than a one-time pick is part of building well.
+
+## Reading a model card and its benchmarks
+
+Each major model arrives with a **model card** — a summary of what it is, how it was trained (when disclosed), what it is good at, and where it should not be used. Learning to read one is a practical skill. The headline is usually a table of **benchmark** scores: MMLU for broad knowledge, HumanEval for coding, GSM8K and MATH for arithmetic and mathematical reasoning, and increasingly agentic benchmarks that measure tool use and multi-step task completion. We cover evaluation properly in Topic 37; here the point is that benchmark numbers are how the field communicates capability, and comparing models means comparing on the benchmarks that match *your* use case rather than a single aggregate score.
+
+Treat published numbers with healthy skepticism. Benchmarks can leak into training data, inflating scores; a model strong on MMLU may still be weak at the specific reasoning your application needs; and human-preference rankings like the Chatbot Arena often diverge from static benchmarks because they capture qualities — helpfulness, tone, instruction-following — that multiple-choice tests miss. The model card and its benchmarks are a starting point for selection, not the final word. The final word, as always in engineering, comes from evaluating candidate models on your own representative tasks, which is exactly the discipline the applied phase will build.
+
+## Code Example
+
+The code calls a modern Claude model through the Anthropic SDK and an OpenAI model through theirs, on the same prompt, so you can compare. It uses the latest model ids per current best practice.
+
+<CodeBlock lang="python" filename="call_llms.py" code={`# call_llms.py
+# pip install anthropic openai
+import os
+
+# --- Anthropic (Claude) — default to the latest, most capable model ---
+from anthropic import Anthropic
+client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+msg = client.messages.create(
+    model="claude-opus-4-8",          # latest Opus; or claude-sonnet-4-6 for speed
+    max_tokens=300,
+    messages=[{"role": "user",
+               "content": "In two sentences, what unlocked in-context learning in LLMs?"}],
+)
+print("CLAUDE:\\n", msg.content[0].text)
+
+# --- OpenAI (GPT) — same prompt for comparison ---
+from openai import OpenAI
+oai = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+resp = oai.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user",
+               "content": "In two sentences, what unlocked in-context learning in LLMs?"}],
+)
+print("\\nGPT:\\n", resp.choices[0].message.content)
+
+# Expected: two concise paragraphs, each crediting model + data scale
+# (GPT-3-era) for the emergence of few-shot in-context learning.
+`} />
+
+The two SDKs share a chat-style interface — a list of messages with roles — which has become the lingua franca of LLM APIs. Note the model ids: for Anthropic, prefer the latest family (Opus 4.8 for maximum capability, Sonnet 4.6 for a speed/quality balance, Haiku 4.5 for cheap high-volume work). Defaulting to the most capable current models is the right call when building AI applications, because capability gains compound across every downstream task.
+
+<KeyTakeaways phase={3}>
+- **GPT-2** (1.5B) showed zero-shot generalization; **GPT-3** (175B) revealed emergent **few-shot in-context learning**, choosing tasks by prompt with no fine-tuning.
+- **InstructGPT/ChatGPT** showed **alignment** (RLHF) can make a small model more useful than a much larger raw one.
+- **GPT-4** added stronger reasoning and **multimodality**, and marked a shift to closed frontier models.
+- The **open-source boom** (LLaMA, Mistral, Gemma) put capable, fine-tunable models in everyone's hands.
+- **Anthropic's Claude** pioneered **Constitutional AI**; the latest models (Opus 4.8, Sonnet 4.6, Haiku 4.5, Fable 5) excel at reasoning, coding, and agentic tool use.
+- Modern LLM APIs share a **chat/messages** interface; default to the latest, most capable models when building.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What new ability did GPT-3 reveal at scale?",
+    options: ["Bidirectional attention", "Few-shot in-context learning — performing tasks from prompt examples with no weight updates", "Image generation", "A larger vocabulary"],
+    correctIndex: 1,
+    explanation: "GPT-3's hundredfold scale-up surfaced in-context learning: the frozen model could perform new tasks given only a few examples in the prompt, with no gradient updates."
+  },
+  {
+    question: "What did InstructGPT demonstrate about alignment vs scale?",
+    options: ["Bigger is always better", "An aligned 1.3B model was preferred by humans over the raw 175B GPT-3", "Alignment is unnecessary", "Scale has no effect"],
+    correctIndex: 1,
+    explanation: "Human raters preferred the much smaller RLHF-aligned InstructGPT over raw GPT-3, showing that teaching a model to follow human intent can matter more than raw parameter count."
+  },
+  {
+    question: "What is 'Constitutional AI', associated with Anthropic's Claude?",
+    options: ["Training only on legal documents", "An alignment approach where the model critiques and revises its outputs against written principles", "A bigger Transformer", "A tokenization scheme"],
+    correctIndex: 1,
+    explanation: "Constitutional AI has the model self-critique and revise against a set of written principles, reducing reliance on large volumes of human preference labels."
+  }
+]} />
+
+## What's Next
+
+The GPT lineage is decoder-only, but a parallel branch kept both an encoder and a decoder. In **T5, BART & Encoder-Decoder LLMs**, we study the text-to-text models that excel when a task needs deep understanding of an input *and* fluent generation of an output.

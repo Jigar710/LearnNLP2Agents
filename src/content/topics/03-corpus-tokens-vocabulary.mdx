@@ -1,0 +1,214 @@
+---
+title: "Corpus, Tokens & Vocabulary"
+subtitle: "How text becomes structure — the foundation of every NLP system"
+phase: 1
+topicNumber: 3
+slug: "corpus-tokens-vocabulary"
+readingTime: 14
+prerequisites: ["intro-to-nlp"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+
+export const topic = getTopicBySlug('corpus-tokens-vocabulary');
+
+<TopicHero topic={topic} />
+
+Every NLP system begins with the same humble ingredients: a pile of text, a way to chop that text into units, and an inventory of the distinct units that appear. These are the *corpus*, the *tokens*, and the *vocabulary*. They sound mundane, but the choices you make here ripple through everything downstream — how big your model is, which words it can represent, how it handles typos and rare terms, and even how much it costs to run. Get them wrong and no amount of clever modelling will save you.
+
+In this topic we build the foundation carefully. You will learn what a corpus is and which famous ones power today's models, how tokenization carves text into units at different granularities, what a vocabulary is and why the out-of-vocabulary problem matters, and the striking statistical regularity — Zipf's Law — that governs word frequencies in every human language. We finish with working Python that builds a vocabulary from scratch and reproduces Zipf's distribution on real text.
+
+## What is a corpus?
+
+A **corpus** (plural *corpora*) is simply a structured collection of text used to train or evaluate language systems. "Structured" can mean as little as "a folder of documents" or as much as "millions of sentences hand-annotated with parse trees." Corpora come in three broad flavours:
+
+- **Monolingual corpora** contain text in a single language — Wikipedia dumps, news archives, web crawls. They are the fuel for language models.
+- **Parallel corpora** contain the *same* content in two or more languages, aligned sentence by sentence. They are essential for machine translation; the Canadian Hansard (parliamentary proceedings in English and French) and Europarl (European Parliament transcripts) are classics.
+- **Annotated corpora** add human labels: POS tags, parse trees, entity spans, sentiment. The Penn Treebank and OntoNotes are landmark examples. Annotation is expensive, which is why annotated corpora are small relative to raw ones.
+
+The size and quality of a corpus largely determine what a model can learn. A model trained only on legal documents will speak like a lawyer and stumble on slang; a model trained on the open web will be broad but will also absorb the web's noise and biases.
+
+## Famous corpora
+
+A handful of corpora have shaped modern NLP, and you will see them cited constantly:
+
+- **Wikipedia** — clean, encyclopedic, multilingual; a staple of pre-training.
+- **Common Crawl** — a massive, regularly-updated crawl of the public web, hundreds of terabytes. Raw and noisy, it must be heavily filtered.
+- **C4 (Colossal Clean Crawled Corpus)** — a cleaned, deduplicated slice of Common Crawl created for Google's T5.
+- **BookCorpus** — thousands of unpublished novels; gave early models a sense of long-form narrative.
+- **The Pile** — an 800 GB curated mix of 22 sources (academic papers, code, web text) assembled by EleutherAI for open LLM research.
+
+The trend over time has been clear: bigger and more diverse corpora produce more capable models, but only if they are carefully cleaned and deduplicated. "Garbage in, garbage out" scales with the data.
+
+<Callout type="warning" title="Data quality beats data quantity">
+A common beginner instinct is to throw as much raw text at a model as possible. In practice, deduplication and quality filtering of a corpus often improve a model *more* than simply adding more unfiltered data. Duplicates waste compute and can cause memorization.
+</Callout>
+
+## Tokenization: character, word, subword, sentence
+
+**Tokenization** is the process of splitting text into the units a model will actually consume. The granularity you choose is a fundamental design decision.
+
+- **Word tokenization** splits on whitespace and punctuation: "don't panic" becomes `["do", "n't", "panic"]`. Intuitive, but it produces huge vocabularies and cannot represent words it never saw in training.
+- **Character tokenization** treats each character as a token. The vocabulary is tiny (a few hundred symbols) and there are no unknown words, but sequences become very long and the model must learn to assemble meaning from individual letters.
+- **Subword tokenization** is the modern compromise: frequent words stay whole, rare words are split into meaningful pieces. "tokenization" might become `token` + `##ization`. This keeps the vocabulary manageable *and* eliminates unknown words. Algorithms like Byte-Pair Encoding power every current LLM, and we devote all of Topic 18 to them.
+- **Sentence tokenization** is a coarser operation that splits a document into sentences, used as a preprocessing step before word-level work.
+
+For this foundational topic we will use simple word tokenization to build intuition; just remember that production LLMs use subword tokenization for the reasons above.
+
+## Vocabulary and the out-of-vocabulary problem
+
+A **vocabulary** is the set of distinct token types a model knows. If you tokenize a corpus and collect the unique tokens, that set is your vocabulary, and its size — `|V|` — is a key hyperparameter. BERT uses about 30,000 subword tokens; LLaMA uses around 32,000; GPT-4's tokenizer uses roughly 100,000.
+
+The trouble with word vocabularies is the **out-of-vocabulary (OOV) problem**. No matter how large your training corpus, real-world text will always contain words you never saw: new slang, product names, typos, rare technical terms. A pure word-level model must map all of these to a single `<UNK>` (unknown) token, throwing away their meaning. Subword tokenization is so popular precisely because it sidesteps OOV: even a word it has never seen can be spelled out from known pieces.
+
+<Callout type="tip">
+The OOV problem is the single biggest reason the field abandoned word-level vocabularies for subwords. When you see a model "understand" a word it could not possibly have memorized, it is usually because the tokenizer broke that word into familiar sub-pieces.
+</Callout>
+
+## Type vs Token
+
+Two words that sound interchangeable in everyday speech mean something precise here. A **token** is an *occurrence* of a word in running text; a **type** is a *distinct* word. The sentence "the cat sat on the mat" has 6 tokens but only 5 types, because "the" appears twice.
+
+The ratio of types to tokens — the **type–token ratio (TTR)** — measures lexical diversity. A text that reuses the same words has a low TTR; a text full of varied vocabulary has a high one. TTR is sensitive to length (longer texts inevitably repeat words), so it is mostly used to compare texts of similar size.
+
+## The Mathematics
+
+Two simple formulas capture the statistics of vocabulary. First, the type–token ratio:
+
+<MathBlock
+  formula="\text{TTR} = \frac{\text{number of types (distinct words)}}{\text{number of tokens (total words)}}"
+  caption="Lexical diversity; closer to 1 means more varied vocabulary."
+/>
+
+Far more profound is **Zipf's Law**, an empirical regularity that holds across every human language. Rank the words of a corpus by frequency, giving the most common word rank 1, the next rank 2, and so on. Zipf observed that a word's frequency is approximately inversely proportional to its rank:
+
+<MathBlock
+  formula="f(r) \approx \frac{C}{r^{\alpha}}"
+  caption="Zipf's Law: word frequency f as a function of rank r, with constant C and exponent α ≈ 1."
+/>
+
+With the exponent `α` close to 1, this says the second-most-common word appears about half as often as the most common, the third about a third as often, and so on. Take logarithms of both sides and the law becomes a straight line:
+
+<MathBlock
+  formula="\log f(r) \approx \log C - \alpha \, \log r"
+  caption="On a log–log plot of frequency versus rank, Zipf's Law is a straight line of slope −α."
+/>
+
+The practical consequences are enormous. A tiny number of words (the, of, and, a, ...) account for a huge fraction of all tokens, while the vast majority of word *types* are rare — appearing only once or twice. These rare words form a "long tail" that is impossible to memorize but collectively very common, which is exactly why robust handling of rare and unseen words (subword tokenization, smoothing, embeddings) is so central to NLP.
+
+<Callout type="tip">
+Zipf's Law is why stopword lists are short but powerful, why vocabularies hit diminishing returns as they grow, and why the long tail of rare words dominates the *type* count. Keep the log–log straight line in your mind's eye.
+</Callout>
+
+## Text normalization
+
+Before counting types you usually **normalize** text to avoid splitting what should be one type into many. Common steps include lowercasing ("The" and "the" become one type), Unicode normalization (so visually identical characters with different code points are unified), stripping or standardizing punctuation, and deciding how to treat numbers and URLs. Normalization is a balance: too little and your vocabulary explodes with trivial variants; too much and you erase meaningful distinctions (lowercasing turns "US" the country into "us" the pronoun). We devote the next topic entirely to preprocessing, so here we keep it minimal.
+
+## How big should the vocabulary be?
+
+Choosing the vocabulary size is a genuine engineering trade-off, and Zipf's Law is what makes it interesting. Because a few words are extremely common and most words are extremely rare, the relationship between vocabulary size and coverage is steeply diminishing. The first few thousand types might cover 90% of all tokens you will ever see; doubling the vocabulary from 50,000 to 100,000 types might add only a percent or two of coverage while substantially increasing the model's size.
+
+A larger vocabulary means shorter token sequences (each word is more likely to be a single token), which is good for the model's ability to capture long-range structure and good for inference cost per word. But it also means a bigger embedding table and output layer — more parameters, more memory, more compute. A smaller vocabulary keeps the model lean but produces longer sequences and splits more words into pieces. Subword tokenizers let you dial this trade-off precisely by choosing how many merge operations to perform. The "right" size depends on the languages you support (multilingual models need bigger vocabularies), the domain, and your compute budget. There is no universal answer, only a curve to navigate — and that curve's shape is dictated by Zipf.
+
+## Counting at scale
+
+The toy example below fits a whole book in memory, but real corpora are measured in terabytes and will not. Production vocabulary construction streams the data: read documents in chunks, update a running `Counter` (or a more memory-efficient count-min sketch for truly massive data), and never hold the full text at once. Frequencies are then used to prune the long tail — words appearing fewer than, say, five times are often dropped or merged into subword pieces, because Zipf guarantees there are a great many of them and each contributes little.
+
+This streaming, count-then-prune pattern is the same whether you are building a classic word vocabulary or training a subword tokenizer like BPE. The statistics of language — a dense head and a long tail — shape the engineering at every scale. Internalize that picture now and the design choices in later topics, from smoothing in language models to the merge rules of modern tokenizers, will feel inevitable rather than arbitrary.
+
+## Code Example
+
+Let us build a vocabulary from scratch, count frequencies, and verify Zipf's Law on a real text. The code uses only the standard library plus `matplotlib` for the plot.
+
+<CodeBlock lang="python" filename="vocabulary_zipf.py" code={`# vocabulary_zipf.py
+# pip install matplotlib
+import re
+from collections import Counter
+import matplotlib.pyplot as plt
+
+text = open("some_book.txt", encoding="utf-8").read()
+
+# 1) Simple word tokenization + normalization (lowercase, words only)
+tokens = re.findall(r"[a-z]+", text.lower())
+
+# 2) Build vocabulary and frequency counts
+counts = Counter(tokens)
+vocab = sorted(counts)                 # the set of distinct types
+
+n_tokens = len(tokens)
+n_types = len(vocab)
+print(f"Tokens: {n_tokens:,}   Types: {n_types:,}")
+print(f"Type-Token Ratio: {n_types / n_tokens:.4f}")
+
+# 3) Most frequent words (the head of the Zipf distribution)
+print("\\nTop 10 words:")
+for word, c in counts.most_common(10):
+    print(f"  {word:<8} {c:,}")
+
+# 4) Out-of-vocabulary demo: words not seen during 'training'
+for w in ["transformer", "cryptocurrency", "the"]:
+    status = "IN vocab" if w in counts else "OOV (unknown)"
+    print(f"  {w:<14} {status}")
+
+# 5) Verify Zipf's Law on a log-log plot
+ranks = range(1, n_types + 1)
+freqs = [c for _, c in counts.most_common()]
+plt.loglog(ranks, freqs, marker=".", linestyle="none")
+plt.xlabel("rank (log)")
+plt.ylabel("frequency (log)")
+plt.title("Zipf's Law: a near-straight line")
+plt.savefig("zipf.png", dpi=120)
+
+# Expected (numbers depend on the book):
+# Tokens: 120,431   Types: 9,872
+# Type-Token Ratio: 0.0820
+# Top 10 words: the, and, of, to, a, ...
+# transformer    OOV (unknown)
+# the            IN vocab
+`} />
+
+Run this on any book-length text and two things jump out. First, the type–token ratio is small — a few thousand types cover a hundred thousand tokens, because words are reused heavily. Second, the log–log plot of frequency versus rank is nearly a straight line, Zipf's Law made visible. And the OOV check shows the inescapable reality: words like "transformer" simply are not in a 19th-century novel's vocabulary, which is the long-tail problem that motivates everything from smoothing to subword tokenization.
+
+<KeyTakeaways phase={1}>
+- A **corpus** is a structured text collection; it can be monolingual, parallel, or annotated, and its size and quality bound what a model can learn.
+- **Tokenization** carves text into units at character, subword, word, or sentence granularity; modern LLMs use **subword** tokenization to balance vocabulary size against the OOV problem.
+- A **vocabulary** is the set of known token types; the **out-of-vocabulary problem** is the reason word-level vocabularies were abandoned.
+- A **token** is an occurrence; a **type** is a distinct word. Their ratio (TTR) measures lexical diversity.
+- **Zipf's Law** — frequency is roughly inversely proportional to rank — produces a straight line on a log–log plot and explains the dominant "head" and the long "tail" of rare words.
+- **Normalization** (lowercasing, Unicode, punctuation) reduces needless vocabulary variation but must not erase meaningful distinctions.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "The sentence 'the cat sat on the mat' has how many tokens and types?",
+    options: ["6 tokens, 6 types", "6 tokens, 5 types", "5 tokens, 6 types", "5 tokens, 5 types"],
+    correctIndex: 1,
+    explanation: "There are 6 word occurrences (tokens), but only 5 distinct words (types) because 'the' appears twice."
+  },
+  {
+    question: "On a log–log plot of word frequency versus rank, Zipf's Law looks like:",
+    options: ["A bell curve", "A roughly straight line with negative slope", "A flat horizontal line", "An exponential spike"],
+    correctIndex: 1,
+    explanation: "Taking logs of f(r) ≈ C / r^α gives log f ≈ log C − α·log r, a straight line of slope −α on log–log axes."
+  },
+  {
+    question: "Which approach best avoids the out-of-vocabulary problem?",
+    options: ["A larger word-level vocabulary", "Subword tokenization", "Removing all rare words", "Mapping everything to <UNK>"],
+    correctIndex: 1,
+    explanation: "Subword tokenization can spell any unseen word out of known pieces, so it never needs a single <UNK> token for whole words — unlike even a very large word-level vocabulary."
+  }
+]} />
+
+## What's Next
+
+You now have raw text, tokens, and a vocabulary. But real text is messy — mixed case, punctuation, contractions, emoji, HTML. In **Text Preprocessing Techniques** you will learn the cleaning and normalization steps that turn raw input into the consistent tokens every model depends on, and exactly when each step helps or hurts.

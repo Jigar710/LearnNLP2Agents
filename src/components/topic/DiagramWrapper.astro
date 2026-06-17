@@ -1,0 +1,49 @@
+---
+/**
+ * DiagramWrapper (PRD §11.8 / Step 6.9) — container for static SVG or
+ * interactive React diagrams: title above, diagram (slot), caption below.
+ * Dark/light aware via theme tokens.
+ */
+interface Props {
+  title?: string;
+  caption?: string;
+}
+const { title, caption } = Astro.props;
+---
+
+<figure class="diagram">
+  {title ? <figcaption class="diagram-title">{title}</figcaption> : null}
+  <div class="diagram-stage">
+    <slot />
+  </div>
+  {caption ? <p class="diagram-caption">{caption}</p> : null}
+</figure>
+
+<style>
+  .diagram {
+    margin: 1.75rem 0;
+  }
+  .diagram-title {
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.6rem;
+  }
+  .diagram-stage {
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-secondary);
+    padding: 1.25rem;
+    overflow-x: auto;
+  }
+  .diagram-caption {
+    margin: 0.6rem 0 0;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    font-style: italic;
+    color: var(--text-muted);
+    text-align: center;
+  }
+</style>

@@ -1,0 +1,200 @@
+---
+title: "Transformer Decoder"
+subtitle: "The GPT side — generating text autoregressively"
+phase: 2
+topicNumber: 16
+slug: "transformer-decoder"
+readingTime: 14
+prerequisites: ["transformer-encoder"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+
+export const topic = getTopicBySlug('transformer-decoder');
+
+<TopicHero topic={topic} />
+
+The encoder reads; the **decoder writes**. Where the encoder builds a bidirectional understanding of a complete input, the decoder generates an output sequence one token at a time, each new token conditioned on everything produced so far. This is the generative half of the Transformer, and a decoder stack on its own is exactly the GPT architecture that powers modern large language models. Understanding it completes your picture of the Transformer.
+
+As promised at the end of the last topic, the decoder is a small edit to the encoder, not a new architecture. It reuses the same building blocks — multi-head attention, feed-forward networks, residual connections, layer normalization — and adds just two things: a *causal mask* on its self-attention so it cannot peek at the future, and a *cross-attention* sublayer so it can consult the encoder's output. This topic explains both, walks through autoregressive generation and teacher forcing, and implements a decoder layer from scratch.
+
+## Decoder structure: three sublayers
+
+An encoder layer had two sublayers; a decoder layer has **three**, each wrapped in the same Add & Norm:
+
+1. **Masked multi-head self-attention** — the decoder attends to the tokens it has generated so far, but a causal mask prevents it from attending to future positions.
+2. **Cross-attention (encoder-decoder attention)** — the decoder attends to the encoder's output, pulling in information from the source sequence.
+3. **Position-wise feed-forward network** — identical to the encoder's.
+
+In a decoder-*only* model like GPT, there is no encoder, so the cross-attention sublayer is dropped and only sublayers 1 and 3 remain. In a full encoder-decoder model like the original Transformer or T5, all three are present.
+
+## Masked self-attention: no peeking at the future
+
+The defining feature of the decoder is the **causal mask**. During generation, the model predicts the next token given the previous ones. If, while learning to predict token 5, the model were allowed to attend to tokens 6, 7, and 8, it could simply copy the answer — and it would learn nothing useful, then fail catastrophically at inference when the future genuinely does not exist yet.
+
+The mask enforces causality. Before the attention softmax, every score from a query at position `i` to a key at any position `j > i` (a future token) is set to negative infinity. After the softmax, those weights become exactly zero, so each position attends only to itself and earlier positions. The result is **left-to-right** self-attention: token 5's representation depends on tokens 1 through 5 only. This is the single difference between the encoder's bidirectional self-attention and the decoder's causal self-attention.
+
+<Callout type="warning" title="Why the causal mask is non-negotiable">
+Train a generative model without the causal mask and it 'cheats' by reading future tokens, producing near-zero training loss and useless generation. The mask is what forces the model to actually learn next-token prediction.
+</Callout>
+
+## Cross-attention: consulting the encoder
+
+In an encoder-decoder model, the second sublayer is **cross-attention**, and it is where the decoder reads the source. The mechanism is ordinary multi-head attention, but with the queries and keys/values coming from *different* places: the **queries come from the decoder** (what am I trying to generate?), while the **keys and values come from the encoder's output** (what does the source contain?). There is no mask here — the decoder may attend to the entire source, since the whole input is available.
+
+This is exactly the cross-attention of Bahdanau, generalized to multi-head form and embedded in a deep stack. It is how a translation decoder, generating the French word for "cat," reaches into the encoded English sentence and focuses on "cat." Cross-attention is the bridge between the two stacks.
+
+## The Mathematics
+
+The causal mask is an additive term applied to the attention scores before the softmax. With `M` an upper-triangular matrix whose entries are `−∞` above the diagonal and `0` on and below it:
+
+<MathBlock
+  formula="\text{MaskedAttention}(Q,K,V) = \text{softmax}\!\left(\frac{Q K^{\top}}{\sqrt{d_k}} + M\right) V"
+  caption="Adding −∞ to future positions makes their softmax weights exactly zero."
+/>
+
+Cross-attention is the same scaled dot-product attention with mismatched sources — decoder state `s` provides queries, encoder output `h` provides keys and values:
+
+<MathBlock
+  formula="\text{CrossAttention} = \text{softmax}\!\left(\frac{(s W^Q)(h W^K)^{\top}}{\sqrt{d_k}}\right)(h W^V)"
+  caption="Queries from the decoder, keys and values from the encoder output."
+/>
+
+## Autoregressive generation and teacher forcing
+
+The decoder generates **autoregressively**: produce one token, append it to the input, and feed the extended sequence back in to produce the next token, repeating until an end-of-sequence token is emitted or a length limit is reached. Each step's prediction becomes part of the next step's context. This is why generation is inherently sequential and why it is slower than the encoder's single parallel pass.
+
+Training, however, uses a trick called **teacher forcing**. Rather than feeding the model its own (initially poor) predictions during training — which would compound errors — we feed the *ground-truth* previous tokens. Combined with the causal mask, this lets the model be trained on a whole target sequence in parallel: every position predicts its next token given the true earlier tokens, and the mask guarantees no position sees its own answer. So training is parallel and fast even though inference is sequential and slow — a crucial asymmetry of generative Transformers.
+
+<Callout type="info" title="Train in parallel, generate in sequence">
+Teacher forcing plus the causal mask means the entire target sequence can be processed in one forward pass at training time. At inference, there is no ground truth to feed, so generation reverts to slow, one-token-at-a-time autoregression.
+</Callout>
+
+## Choosing the next token: a preview of decoding strategies
+
+At each step the decoder produces a probability distribution over the whole vocabulary — but which token do you actually emit? This *decoding strategy* shapes the output as much as the model itself, and it is worth previewing now.
+
+The simplest choice is **greedy decoding**: take the single highest-probability token every step. Fast, but myopic — it can paint itself into a corner and produce repetitive or bland text. **Beam search** keeps the `k` most probable partial sequences at each step and expands all of them, exploring several paths before committing; it produces higher-quality output for tasks with a "correct" answer, like translation, at extra compute. For open-ended generation, deterministic methods feel robotic, so **sampling** methods introduce controlled randomness: **temperature** sharpens or flattens the distribution before sampling, **top-k** restricts sampling to the `k` most likely tokens, and **top-p (nucleus)** sampling restricts it to the smallest set of tokens whose probabilities sum to `p`. We devote real attention to these in Topic 20 and again in prompt engineering; for now, note that the decoder hands you a distribution, and turning that distribution into text is a separate, consequential decision.
+
+## The KV cache: making generation fast
+
+Naive autoregressive generation is wasteful. To produce token 100, you feed in tokens 1 through 99 and run the whole decoder — but tokens 1 through 99 were already processed when you generated token 99. Recomputing their keys and values every step is pure redundancy.
+
+The **KV cache** fixes this. Because of the causal mask, the key and value vectors for past positions never change as new tokens are added — position 50's key is the same whether the sequence is 60 or 600 tokens long. So you compute each position's keys and values once and *cache* them; at each new step you compute Q, K, V only for the single new token and attend against the cached keys and values of all previous tokens. This turns each generation step from "reprocess the whole sequence" into "process one token against a cache," a massive speedup that every production system relies on. The cost is memory: the cache grows with sequence length and batch size, which is why managing it (the PagedAttention of Topic 38, and the multi-query and grouped-query attention of Topic 13) is central to serving large models efficiently.
+
+## Decoder-only versus encoder-decoder, revisited
+
+With both stacks built, the architectural choice comes into focus. **Encoder-decoder** models excel when input and output are distinct sequences with a clear mapping — translation, summarization — because the encoder can build a rich bidirectional representation of the source while the decoder generates conditioned on it through cross-attention. **Decoder-only** models, by contrast, treat everything as one continuous stream: the prompt and the response are concatenated, and the same causal self-attention handles both. There is no separate encoder and no cross-attention.
+
+It might seem that encoder-decoder is strictly more powerful, yet the largest and most capable language models are overwhelmingly decoder-only. Why? Simplicity and scale. A single stack is easier to scale, easier to train on raw text with one uniform next-token objective, and naturally handles in-context learning, where the "input" and "output" blur into one conversation. The decoder-only design also benefits from the KV cache uniformly across the whole sequence. The field's verdict, at least for general-purpose language models, has landed firmly on the decoder-only side — which is exactly why the next phase of this curriculum, on large language models, lives almost entirely in decoder-only territory.
+
+## From decoder output to vocabulary probabilities
+
+One step is easy to gloss over: how does the decoder's final vector become an actual token? After the last decoder layer, each position holds a `d_model`-dimensional vector. To turn it into a prediction, a final **linear projection** maps that vector to a logit for every word in the vocabulary — a vector of size `|V|`, often tens of thousands long. A softmax over those logits gives the probability distribution from which the next token is chosen.
+
+A clever and widely-used trick here is **weight tying**: the output projection matrix is set to be the *transpose of the input embedding matrix*, so the same parameters that map token ids to vectors at the input also map vectors back to token scores at the output. This is intuitive — a word's input embedding and its output representation describe the same word — and it saves a large number of parameters, since the embedding table for a big vocabulary is one of the largest tensors in the model. Most modern language models tie these weights by default.
+
+This output head is shared between encoder-decoder and decoder-only models, and it is where the vocabulary choices from Phase 1 come home to roost: a 100,000-token vocabulary means a 100,000-way classification at every single generation step. The size of the vocabulary directly sets the size of this final layer and a chunk of the model's compute per token, closing the loop back to the tokenization decisions you studied in Topic 3. Architecture, vocabulary, and cost are all bound together at this final projection.
+
+## Code Example
+
+The code builds a decoder layer with masked self-attention, cross-attention, and an FFN, constructs the causal mask, and runs one decoding step against a dummy encoder output.
+
+<CodeBlock lang="python" filename="transformer_decoder.py" code={`# transformer_decoder.py
+# pip install torch
+import torch
+import torch.nn as nn
+
+def causal_mask(n):
+    # True where attention is FORBIDDEN (future positions)
+    return torch.triu(torch.ones(n, n, dtype=torch.bool), diagonal=1)
+
+class DecoderLayer(nn.Module):
+    def __init__(self, d_model, n_heads, d_ff):
+        super().__init__()
+        self.self_attn  = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
+        self.cross_attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
+        self.ff = nn.Sequential(nn.Linear(d_model, d_ff), nn.ReLU(),
+                                nn.Linear(d_ff, d_model))
+        self.n1 = nn.LayerNorm(d_model)
+        self.n2 = nn.LayerNorm(d_model)
+        self.n3 = nn.LayerNorm(d_model)
+
+    def forward(self, x, enc_out, tgt_mask):
+        # 1) masked self-attention (decoder attends to itself, causally)
+        a, _ = self.self_attn(x, x, x, attn_mask=tgt_mask)
+        x = self.n1(x + a)
+        # 2) cross-attention (Q from decoder, K/V from encoder)
+        c, _ = self.cross_attn(x, enc_out, enc_out)
+        x = self.n2(x + c)
+        # 3) feed-forward
+        x = self.n3(x + self.ff(x))
+        return x
+
+torch.manual_seed(0)
+d_model, n_heads, d_ff, tgt_len, src_len = 512, 8, 2048, 6, 9
+dec = DecoderLayer(d_model, n_heads, d_ff)
+
+tgt     = torch.randn(1, tgt_len, d_model)   # target tokens so far
+enc_out = torch.randn(1, src_len, d_model)   # encoder output (source)
+mask    = causal_mask(tgt_len)
+
+out = dec(tgt, enc_out, mask)
+print("causal mask (True = blocked):")
+print(mask.int().numpy())
+print("decoder output shape:", tuple(out.shape))
+
+# Expected: upper-triangular True mask, output (1, 6, 512)
+# causal mask (True = blocked):
+# [[0 1 1 1 1 1]
+#  [0 0 1 1 1 1]
+#  ...
+#  [0 0 0 0 0 0]]
+# decoder output shape: (1, 6, 512)
+`} />
+
+The printed mask is the heart of the decoder: row `i` has `True` (blocked) for every column `j > i`, so position `i` can attend only to positions up to and including itself. Swap out the cross-attention sublayer and you have a GPT-style decoder-only block; keep it and you have the generative half of a full encoder-decoder Transformer. Either way, you have now built every component of the architecture — the next topic assembles the complete model.
+
+<KeyTakeaways phase={2}>
+- A decoder layer has **three sublayers**: masked self-attention, cross-attention, and a feed-forward network (decoder-only models drop cross-attention).
+- The **causal mask** sets future-position scores to −∞ before the softmax, forcing left-to-right attention so the model genuinely learns next-token prediction.
+- **Cross-attention** takes queries from the decoder and keys/values from the encoder output, letting the decoder consult the source.
+- Generation is **autoregressive**: produce a token, append it, repeat — inherently sequential and slower than the encoder's parallel pass.
+- **Teacher forcing** plus the causal mask lets the whole target be trained in parallel, even though inference is sequential.
+- A decoder stack alone (with causal masking) is the **GPT architecture**.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Why does the decoder use masked self-attention?",
+    options: ["To save memory", "To prevent each position from attending to future tokens, so the model truly learns next-token prediction", "To make attention bidirectional", "To remove positional encoding"],
+    correctIndex: 1,
+    explanation: "The causal mask blocks attention to future positions. Without it, the model could copy the answer from future tokens during training and would fail at inference, where the future does not exist yet."
+  },
+  {
+    question: "In cross-attention, where do the queries, keys, and values come from?",
+    options: ["All from the decoder", "All from the encoder", "Queries from the decoder; keys and values from the encoder output", "Queries from the encoder; keys/values from the decoder"],
+    correctIndex: 2,
+    explanation: "Cross-attention uses decoder states as queries and encoder outputs as keys and values, letting the decoder attend to the source sequence."
+  },
+  {
+    question: "What does teacher forcing enable during training?",
+    options: ["Slower but more accurate generation", "Training the whole target sequence in parallel by feeding ground-truth previous tokens", "Removing the need for a decoder", "Bidirectional attention in the decoder"],
+    correctIndex: 1,
+    explanation: "By feeding the true previous tokens (instead of the model's own predictions) and applying the causal mask, every position can be trained to predict its next token in a single parallel forward pass."
+  }
+]} />
+
+## What's Next
+
+You have built the encoder and the decoder. In **Full Transformer — 'Attention is All You Need'**, we assemble them into the complete architecture from the landmark 2017 paper, walk through training details like warmup and label smoothing, and explore an interactive diagram of the whole model end to end.

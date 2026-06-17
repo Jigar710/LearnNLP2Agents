@@ -1,0 +1,415 @@
+@import "tailwindcss";
+@import "./katex.css";
+
+/* Bridge the legacy JS config (phase colors, fonts, radius tokens) into Tailwind v4 */
+@config "../../tailwind.config.mjs";
+
+/* Enable `dark:` utilities driven by html[data-theme="dark"] */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ============================================================
+   COLOR TOKENS — Light Mode (default)
+   ============================================================ */
+:root {
+  /* Surfaces & text */
+  --bg-primary: #FAFAF9;
+  --bg-secondary: #FFFFFF;
+  --bg-sidebar: #F5F5F3;
+  --border-color: #E5E7EB;
+  --border-subtle: #F0F0EE;
+  --text-primary: #111827;
+  --text-secondary: #4B5563;
+  --text-muted: #9CA3AF;
+  --code-bg: #1E1E2E; /* dark always — better readability */
+  --code-bg-inline: #F3F4F6;
+  --link-color: #2563EB;
+  --link-hover: #1D4ED8;
+
+  /* Phase accent colors (fixed across light/dark) */
+  --phase-1: #0D9488;
+  --phase-1-light: #CCFBF1;
+  --phase-1-dark: #042F2E;
+  --phase-2: #7C3AED;
+  --phase-2-light: #EDE9FE;
+  --phase-2-dark: #2E1065;
+  --phase-3: #2563EB;
+  --phase-3-light: #DBEAFE;
+  --phase-3-dark: #1E3A8A;
+  --phase-4: #D97706;
+  --phase-4-light: #FEF3C7;
+  --phase-4-dark: #78350F;
+  --phase-5: #EA580C;
+  --phase-5-light: #FFEDD5;
+  --phase-5-dark: #7C2D12;
+
+  /* Semantic colors */
+  --success: #16A34A;
+  --warning: #D97706;
+  --danger: #DC2626;
+  --info: #2563EB;
+
+  /* Callout backgrounds (light) */
+  --callout-info-bg: #EFF6FF;
+  --callout-tip-bg: #F0FDF4;
+  --callout-warn-bg: #FFFBEB;
+  --callout-danger-bg: #FEF2F2;
+
+  /* Default accent used by selection / focus (overridden per-phase) */
+  --accent: var(--phase-1);
+
+  /* Font families */
+  --font-serif: "Cormorant Garamond", Georgia, serif;
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+
+  color-scheme: light;
+}
+
+/* ============================================================
+   COLOR TOKENS — Dark Mode
+   ============================================================ */
+html[data-theme="dark"] {
+  --bg-primary: #0C0C0E;
+  --bg-secondary: #111116;
+  --bg-sidebar: #0F0F14;
+  --border-color: #1F2937;
+  --border-subtle: #1A1A24;
+  --text-primary: #F9FAFB;
+  --text-secondary: #D1D5DB;
+  --text-muted: #6B7280;
+  --code-bg: #13131A;
+  --code-bg-inline: #1F2937;
+  --link-color: #60A5FA;
+  --link-hover: #93C5FD;
+
+  /* Callout backgrounds (dark) */
+  --callout-info-bg: #1E3A5F;
+  --callout-tip-bg: #14532D;
+  --callout-warn-bg: #451A03;
+  --callout-danger-bg: #450A0A;
+
+  color-scheme: dark;
+}
+
+/* ============================================================
+   BASE RESETS & TYPOGRAPHY
+   ============================================================ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 80px; /* clear the fixed 60px navbar on anchor jumps */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.75;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Smooth theme transition (F2) */
+  transition: background-color 200ms ease, color 200ms ease;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--text-primary);
+  margin: 0;
+}
+
+a {
+  color: var(--link-color);
+  text-decoration: none;
+  transition: color 150ms ease;
+}
+
+a:hover {
+  color: var(--link-hover);
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-mono);
+}
+
+/* Inline code */
+:not(pre) > code {
+  font-size: 0.875rem;
+  background: var(--code-bg-inline);
+  color: var(--text-primary);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+img,
+svg,
+video {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Phase-colored text selection */
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--text-primary);
+}
+
+/* Visible focus ring for keyboard users (Appendix B accessibility) */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Skip-to-content link (Appendix B) */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 1000;
+  padding: 0.5rem 1rem;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 0 0 8px 0;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+/* Themed, slim scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+}
+
+/* Per-phase accent helper: set `style="--accent: var(--phase-N)"` on a wrapper
+   to recolor selection, focus rings, and any element using var(--accent). */
+.phase-1 { --accent: var(--phase-1); }
+.phase-2 { --accent: var(--phase-2); }
+.phase-3 { --accent: var(--phase-3); }
+.phase-4 { --accent: var(--phase-4); }
+.phase-5 { --accent: var(--phase-5); }
+
+/* ============================================================
+   QuizBlock (React island — styles must be global)
+   ============================================================ */
+.quiz {
+  margin: 1.5rem 0;
+  padding: 1.25rem 1.4rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-secondary);
+}
+.quiz-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+}
+.quiz-q {
+  font-weight: 600;
+  font-size: 0.98rem;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+.quiz-count {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.quiz-options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.quiz-option {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, opacity 150ms ease;
+}
+.quiz-option:hover:not(:disabled) {
+  border-color: var(--accent, var(--phase-1));
+}
+.quiz-option:disabled {
+  cursor: default;
+}
+.quiz-marker {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: var(--code-bg-inline);
+  color: var(--text-secondary);
+}
+.quiz-option.is-correct {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+.quiz-option.is-correct .quiz-marker {
+  background: var(--success);
+  color: #fff;
+}
+.quiz-option.is-wrong {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.quiz-option.is-wrong .quiz-marker {
+  background: var(--danger);
+  color: #fff;
+}
+.quiz-option.is-dim {
+  opacity: 0.6;
+}
+.quiz-explain {
+  margin-top: 0.9rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+.quiz-explain.ok {
+  background: var(--callout-tip-bg);
+  border-left: 3px solid var(--success);
+}
+.quiz-explain.no {
+  background: var(--callout-danger-bg);
+  border-left: 3px solid var(--danger);
+}
+.quiz-answer em,
+.quiz-explain em {
+  font-style: italic;
+  font-weight: 600;
+}
+.quiz-next {
+  margin-top: 0.9rem;
+  padding: 0.45rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--accent, var(--phase-1));
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.quiz-next:hover {
+  background: color-mix(in srgb, var(--accent, var(--phase-1)) 10%, transparent);
+}
+
+/* ============================================================
+   TOPIC ARTICLE PROSE — heading hierarchy & spacing
+   (MDX content is slotted, so these must be global, not scoped)
+   ============================================================ */
+.topic-main h2 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 1.5rem;       /* 24px (§7) */
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  margin-top: 2.75rem;
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border-subtle);
+  scroll-margin-top: 80px;
+}
+.topic-main h3 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 1.2rem;       /* ~19px */
+  line-height: 1.35;
+  color: var(--text-primary);
+  margin-top: 2rem;
+  margin-bottom: 0.5rem;
+  scroll-margin-top: 80px;
+}
+.topic-main h4 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text-primary);
+  margin-top: 1.5rem;
+  margin-bottom: 0.4rem;
+  scroll-margin-top: 80px;
+}
+.topic-main p {
+  margin: 1rem 0;
+  color: var(--text-primary);
+}
+.topic-main ul,
+.topic-main ol {
+  margin: 1rem 0;
+  padding-left: 1.5rem;
+}
+.topic-main li {
+  margin: 0.45rem 0;
+  line-height: 1.7;
+}
+.topic-main li::marker {
+  color: var(--text-muted);
+}
+.topic-main a {
+  color: var(--link-color);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 500;
+}
+.topic-main a:hover { color: var(--link-hover); }
+.topic-main strong { font-weight: 600; color: var(--text-primary); }
+.topic-main hr {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 2rem 0;
+}
+.topic-main blockquote {
+  margin: 1.25rem 0;
+  padding: 0.25rem 0 0.25rem 1rem;
+  border-left: 3px solid var(--border-color);
+  color: var(--text-secondary);
+}

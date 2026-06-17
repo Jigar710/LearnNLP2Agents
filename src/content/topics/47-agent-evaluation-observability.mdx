@@ -1,0 +1,168 @@
+---
+title: "Agent Evaluation & Observability"
+subtitle: "Measuring and debugging what your agent actually does"
+phase: 5
+topicNumber: 47
+slug: "agent-evaluation-observability"
+readingTime: 15
+prerequisites: ["multi-agent-systems"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+
+export const topic = getTopicBySlug('agent-evaluation-observability');
+
+<TopicHero topic={topic} />
+
+An agent that works in your demo can fail a hundred different ways in production — taking a wrong action, looping, hallucinating a tool result, or quietly costing ten times what you expected. You cannot improve or trust what you cannot see. **Agent evaluation** measures whether an agent achieves its goals and behaves well; **observability** traces what the agent actually did, step by step, so you can debug it. Together they are what turn a fragile demo into a dependable system, and they are the unglamorous discipline that separates agents that ship from agents that stay forever in prototype. This topic covers how to evaluate agents (which is harder than evaluating single LLM calls) and how to instrument them for observability.
+
+Agents are uniquely hard to evaluate because they take *many* steps, each of which can go wrong, and because success is multidimensional — a correct answer reached through a wasteful, unsafe trajectory is not really a success. So agent evaluation looks at the whole journey, not just the destination.
+
+## Why agent evaluation is harder than LLM evaluation
+
+Evaluating a single LLM call (Topic 37) is already hard; evaluating an agent is harder for several reasons. An agent takes **many steps**, and an error at any step can derail the whole task, so you must assess the *trajectory*, not just the final output. Success is **multidimensional**: did it achieve the goal, but also did it use the right tools, take an efficient path, avoid harmful actions, and not hallucinate? Agents are **stochastic and long-running**, so the same task can play out differently each run. And agents *act*, so a failure can have real consequences, not just a bad answer. These properties demand richer evaluation than a single-output metric.
+
+## Evaluation dimensions
+
+A complete agent evaluation considers several dimensions:
+
+- **Task success rate**: did the agent achieve the goal? The headline metric.
+- **Tool selection accuracy**: did it choose the right tools for each step?
+- **Step efficiency**: how many steps and how much cost did it take? Fewer is better.
+- **Hallucination rate**: did it invent facts or fabricate tool results?
+- **Safety**: did it avoid harmful, unauthorized, or destructive actions?
+
+An agent strong on success but weak on efficiency burns money; strong on success but weak on safety is dangerous. You evaluate across dimensions, not on one number.
+
+## Evaluation datasets and benchmarks
+
+The field has built agent benchmarks that test realistic multi-step tasks. **AgentBench** evaluates agents across diverse environments (web, databases, games). **WebArena** tests agents performing real tasks on websites. **SWE-Bench** is influential and demanding: it asks agents to resolve real GitHub issues by editing code across a repository and passing the project's tests — a genuine software-engineering task. These benchmarks measure agents on hard, realistic work, and progress on them (especially SWE-Bench) tracks how capable coding agents have become. For your own agent, though, the most valuable evaluation is a custom dataset of *your* tasks.
+
+## Observability: tracing what the agent did
+
+Because an agent's behaviour unfolds across many hidden LLM and tool calls, **observability** is essential. **Tracing** captures every step — each LLM call (prompt and response), each tool call (input and output), each intermediate state — so you can see exactly what the agent did and where it went wrong. Without tracing, debugging an agent is guesswork; with it, a mysterious failure becomes a specific, locatable one. Tools include **LangSmith** (LangChain's tracing platform), **LangFuse** (open-source observability), **Arize Phoenix** (ML/LLM observability), and **OpenTelemetry**-based instrumentation for standardized tracing. These record the full trajectory of every agent run for inspection.
+
+<Callout type="tip">
+Tracing is to agents what a debugger is to code. When an agent misbehaves, you do not guess — you open the trace, walk through each thought, tool call, and observation, and find the exact step where it went wrong. Instrument tracing from day one, not after you have a mysterious bug.
+</Callout>
+
+## Cost and latency profiling
+
+Two operational metrics deserve constant attention. **Cost tracking**: every LLM call costs tokens, and an agent's multi-step, looping nature can make costs balloon unpredictably — a task you expected to cost cents can cost dollars if the agent loops. Track tokens and cost per run so you catch expensive runs and optimize. **Latency profiling**: agents can be slow (many sequential steps), and tracing lets you see *which* step is the bottleneck — a slow tool, a long generation, an unnecessary loop — so you can optimize the right thing. Cost and latency are first-class agent metrics, not afterthoughts.
+
+## A/B testing and building eval datasets
+
+To improve an agent safely, **A/B test** changes: route a fraction of traffic to a new version and compare success, cost, and latency on real tasks before rolling it out. And the foundation of all agent evaluation is a **golden dataset** of representative tasks with known-good outcomes or success criteria — built from real or realistic tasks, covering edge cases, and grown over time as you discover failures (every production bug becomes a new test case). Combined with LLM-as-judge for open-ended success criteria, this dataset is your regression suite, catching when a change quietly breaks behaviour. The discipline mirrors LLM evaluation (Topic 37) with the added complexity of multi-step trajectories.
+
+## LLM-as-judge for agent trajectories
+
+Evaluating whether an agent *succeeded* is often itself a judgment call that no simple metric captures — did the research report actually answer the question, was the code change correct and clean, did the agent take a sensible path? This is where **LLM-as-judge** (Topic 37) extends naturally to agents. You can use a capable model to judge not only the final output against the goal but the *trajectory* itself: was each tool call appropriate, was the reasoning sound, were there wasteful or repeated steps, did the agent recover gracefully from errors? Feeding the full trace to a judge model with a rubric turns a long, complex run into a structured assessment.
+
+Trajectory-level judging is powerful precisely because agent failures often hide in the *process* even when the final answer happens to be right. An agent that stumbled to a correct answer through a tangle of wrong turns, lucky guesses, and redundant calls is fragile — it will fail on the next slightly different task — and only by examining the trajectory do you see that fragility. The judge can flag these process problems that an outcome-only metric misses. The same biases that affect LLM judges generally (favouring verbosity, position effects) apply here and must be mitigated with clear rubrics and spot-checks against human review, but trajectory judging has become a practical and scalable way to evaluate agents at the depth they require. Combined with automated checks for the objective dimensions — did the tests pass, did the action succeed, how many steps — it gives a rounded picture: hard metrics for what can be measured exactly, and judged assessment for the qualities that require understanding.
+
+## The feedback loop: from traces to improvements
+
+Observability is not an end in itself; its value is in the *loop* it enables. Traces of real agent runs — especially the failures — are the raw material for improvement. The disciplined cycle is: instrument the agent so every run produces a trace, collect and review the failures, identify the recurring failure patterns, and turn each into both a fix and a new test case in the golden dataset. A failure that you trace, understand, fix, and add to the regression suite is a failure that cannot silently recur, and over time this loop hardens the agent against the long tail of ways it can go wrong.
+
+This loop is how agents mature from impressive demos into reliable products. Demos are tested on the happy path; production agents face the full, messy distribution of real inputs, and the only way to cover that distribution is to keep discovering failures and systematically closing them. Observability makes the discovery possible — you cannot fix what you cannot see — and the golden dataset makes the fixes permanent. Teams that build this loop improve their agents steadily and predictably; teams that ship and hope lurch from one mysterious production fire to the next. The unglamorous truth is that the difference between a flashy prototype and a dependable agent is largely this discipline: relentless observation, systematic learning from failures, and a growing regression suite, applied patiently over time. It is the same measure-and-iterate ethos that ran through the applied phase, intensified by the higher stakes and greater complexity of systems that act in the world.
+
+## Evaluation-driven agent development
+
+Taken to its conclusion, the right way to build agents is **evaluation-driven**: define how you will measure success *before* building, assemble a dataset of representative tasks, and use it to drive every development decision. Rather than building an agent and hoping it works, you build it against a measurable target, running the evaluation suite on every change to confirm improvement and catch regressions. This inverts the typical demo-driven flow — where you build something that works on a few examples and discover its weaknesses in production — into a disciplined process where the agent's quality is known and monitored throughout.
+
+This is harder and less immediately gratifying than demo-driven development; assembling a good evaluation set is real work, and watching numbers is less exciting than watching an agent do something clever. But it is the difference between agents you can *trust* and agents you merely *hope* about. As agents take on more consequential work — writing production code, taking actions in real systems, handling real users — the cost of unmeasured failure rises, and the discipline of evaluation-driven development shifts from good practice to necessity. The capability to *build* an agent, which this phase has developed extensively, is necessary but not sufficient; the capability to *know whether the agent works*, and to keep knowing as it changes and as the world changes, is what makes that agent deployable. Evaluation and observability are not the exciting part of agent engineering, but they are the part that determines whether your agents are toys or tools — and that determination is what the final topic, on production deployment, depends on entirely.
+
+## Code Example
+
+The code instruments an agent run with simple tracing and a cost estimator, capturing every step and tallying token cost — the foundation of agent observability.
+
+<CodeBlock lang="python" filename="agent_tracing.py" code={`# agent_tracing.py
+# pip install anthropic
+import os, time
+from anthropic import Anthropic
+
+client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+# --- A simple tracer: record every step with timing and token usage ---
+class Trace:
+    def __init__(self):
+        self.steps, self.in_tok, self.out_tok = [], 0, 0
+    def record(self, kind, detail, usage=None, dt=0.0):
+        if usage:
+            self.in_tok += usage.input_tokens
+            self.out_tok += usage.output_tokens
+        self.steps.append({"kind": kind, "detail": detail[:60], "dt": round(dt, 2)})
+    def cost(self, in_price=15/1e6, out_price=75/1e6):   # example $/token
+        return self.in_tok * in_price + self.out_tok * out_price
+    def report(self):
+        for i, s in enumerate(self.steps, 1):
+            print(f"  {i}. [{s['kind']}] {s['detail']} ({s['dt']}s)")
+        print(f"tokens: {self.in_tok} in / {self.out_tok} out  "
+              f"cost: \${self.cost():.4f}")
+
+def traced_call(trace, prompt, tools=None):
+    t0 = time.time()
+    resp = client.messages.create(
+        model="claude-opus-4-8", max_tokens=400,
+        tools=tools or [], messages=[{"role": "user", "content": prompt}])
+    trace.record("llm_call", prompt, usage=resp.usage, dt=time.time() - t0)
+    return resp
+
+# --- Run an agent step with full tracing ---
+trace = Trace()
+resp = traced_call(trace, "What is 23 * 17? Reason step by step.")
+trace.record("answer", resp.content[0].text)
+print("AGENT TRACE:")
+trace.report()
+
+# Expected:
+# AGENT TRACE:
+#   1. [llm_call] What is 23 * 17? Reason step by step. (1.2s)
+#   2. [answer] 23 * 17 = 391 ...
+# tokens: 18 in / 64 out  cost: $0.0050
+`} />
+
+The tracer captures every step with its timing and records token usage to estimate cost — a minimal version of what LangSmith and LangFuse do at scale. In a full agent, you would record every LLM call, tool call, and observation, building a complete trajectory you can inspect when something breaks and a cost/latency tally you can monitor. This instrumentation, layered onto the agents from earlier topics, is what makes them debuggable and trustworthy — the prerequisite for the production deployment of the final topic.
+
+<KeyTakeaways phase={5}>
+- Agent evaluation is **harder than LLM evaluation**: many steps (assess the trajectory, not just the output), multidimensional success, stochastic long runs, and real-world consequences.
+- Evaluate across **task success, tool-selection accuracy, step efficiency, hallucination rate, and safety** — not one number.
+- Benchmarks like **AgentBench, WebArena, and SWE-Bench** test realistic multi-step tasks; SWE-Bench (resolving real GitHub issues) is especially influential.
+- **Observability via tracing** captures every LLM call, tool call, and state, turning mysterious failures into locatable ones — use **LangSmith, LangFuse, Phoenix**, or OpenTelemetry.
+- Track **cost and latency** per run — agents' looping nature can balloon both — and profile traces to find bottlenecks.
+- **A/B test** changes and maintain a **golden dataset** of tasks (grown from real failures) as a regression suite, with LLM-as-judge for open-ended success.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What metrics would you use to evaluate a coding agent?",
+    options: ["Only whether the code compiles", "Task success (tests pass), tool-selection accuracy, step efficiency/cost, hallucination rate, and safety — assessing the whole trajectory", "Only the number of tokens", "Only latency"],
+    correctIndex: 1,
+    explanation: "A coding agent is judged on whether it resolves the task (e.g. passes tests), but also on how efficiently and safely it got there, whether it used tools well, and whether it fabricated anything — the trajectory, not just the final code."
+  },
+  {
+    question: "Why is tracing essential for agents specifically?",
+    options: ["It makes them faster", "An agent's behaviour unfolds across many hidden LLM and tool calls, so without a step-by-step trace, debugging a failure is guesswork", "It reduces token cost", "It replaces evaluation"],
+    correctIndex: 1,
+    explanation: "Agents take many steps internally. Tracing records each thought, tool call, and observation so you can walk through exactly what happened and locate where it went wrong, rather than guessing."
+  },
+  {
+    question: "Why must you track cost per agent run, not just per LLM call?",
+    options: ["Cost is fixed", "An agent's multi-step, looping nature can make total cost balloon unpredictably — a task expected to cost cents can cost dollars if it loops", "Agents are always cheap", "Cost does not matter"],
+    correctIndex: 1,
+    explanation: "Because an agent makes many LLM calls and can loop, the cost of completing one task is variable and can spike. Tracking cost per run catches expensive runs that per-call costs would hide."
+  }
+]} />
+
+## What's Next
+
+You can build, coordinate, and evaluate agents — the final step is deploying them reliably and safely at scale. In **Production Agentic Systems & Best Practices**, we bring everything together: the architecture, error handling, safety guardrails, and operational practices that production agents demand.

@@ -1,0 +1,168 @@
+---
+title: "LangChain Framework Deep Dive"
+subtitle: "The Swiss Army knife of LLM application development"
+phase: 5
+topicNumber: 42
+slug: "langchain"
+readingTime: 17
+prerequisites: ["tool-use-function-calling"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+
+export const topic = getTopicBySlug('langchain');
+
+<TopicHero topic={topic} />
+
+You can build agents and RAG systems from raw API calls — and you now know how. But doing it from scratch every time means reimplementing the same plumbing: prompt templates, output parsing, retrieval, memory, tool loops. **LangChain** is the most popular framework for assembling these pieces, providing reusable abstractions and integrations so you compose applications from building blocks instead of wiring everything by hand. This topic surveys LangChain's core abstractions, its expression language (LCEL), and — just as important — when its abstractions help versus when raw control serves you better.
+
+A balanced view matters here. Frameworks accelerate development but add a layer of indirection that can obscure what is happening and make debugging harder. Because you understand the fundamentals from the previous topics, you can use LangChain as a convenience rather than a crutch, reaching for it when it saves real work and dropping to raw calls when you need control.
+
+## What is LangChain?
+
+LangChain is a framework for building LLM applications from composable components. It provides standard interfaces for models, prompts, retrievers, tools, and memory, plus a large ecosystem of integrations (dozens of model providers, vector stores, document loaders). Its goal is to let you assemble common patterns — RAG, agents, chatbots — quickly, without rewriting the glue each time. It is best thought of as a toolkit of interoperable parts plus the connectors between them.
+
+## Core abstractions
+
+LangChain centers on a few abstractions. A **model** wraps an LLM behind a uniform interface so you can swap providers. A **prompt** template parameterizes the text sent to the model. An **output parser** turns the model's response into structured data. **Memory** persists conversation state. **Retrievers** fetch relevant documents. **Tools** are functions an agent can call. And a **chain** composes these into a pipeline. The power is that these share interfaces, so they snap together and you can swap any piece.
+
+## LangChain Expression Language (LCEL)
+
+The modern way to compose LangChain components is **LCEL**, which uses the pipe operator (`|`) to chain components into a pipeline — the output of one becomes the input of the next. A RAG chain might be `retriever | prompt | model | parser`, read left to right as "retrieve, build a prompt, call the model, parse the output." LCEL is declarative and composable, and it gives every pipeline a uniform interface.
+
+<Callout type="tip">
+The LCEL pipe (|) is just function composition for LLM components: `a | b | c` feeds a's output into b, then b's into c. If you understand Unix pipes, you understand LCEL — it is the same idea applied to prompts, models, and retrievers.
+</Callout>
+
+## Runnables: invoke, stream, batch
+
+Everything composable in LCEL is a **Runnable**, an interface that provides three execution methods for free: **invoke** (run once on one input), **stream** (yield the output incrementally, for token-by-token UIs), and **batch** (run efficiently on many inputs at once). Because every component implements this interface, any pipeline you build automatically supports all three — write a chain once and you can invoke it, stream it, or batch it without extra work. This uniformity is LCEL's quiet superpower.
+
+## Document loaders and text splitters
+
+For RAG, LangChain provides **document loaders** for dozens of sources — PDFs, web pages, CSVs, Notion, Confluence, databases — that normalize each into a common document format. It also provides **text splitters** implementing the chunking strategies from Topic 34 (recursive, by token, by structure). Together these handle the "get documents into chunks" stage of RAG with little code, which is a real convenience given how many file formats real applications must ingest.
+
+## Vector stores, retrievers, and chains
+
+LangChain integrates with the vector databases from Topic 35 (Chroma, FAISS, Qdrant, Pinecone) behind a uniform interface, and any vector store exposes an `as_retriever()` method that turns it into a retriever you can drop into a chain. It also ships **built-in chains** for common patterns — retrieval-augmented QA, conversational retrieval with memory — that wire retriever, prompt, and model together so you get a working RAG system in a few lines. These prebuilt patterns are where LangChain saves the most time for standard use cases.
+
+## Agents with LangChain
+
+LangChain provides agent constructors — notably `create_react_agent` and an `AgentExecutor` — that implement the ReAct loop from Topic 40 for you: you supply tools and a model, and the framework handles the think-act-observe loop, parsing, and tool dispatch. This is convenient for standard agents, though for complex, stateful agents the newer LangGraph (Topic 43) gives more control, which is why the next topic exists.
+
+## LangSmith: tracing and debugging
+
+Agent and chain behaviour is hard to debug because so much happens inside the LLM and across many steps. **LangSmith** is LangChain's observability platform: it traces every model call, tool call, and intermediate step, so you can see exactly what prompt was sent, what the model returned, and where a pipeline went wrong. This tracing is invaluable — debugging an LLM application blind is miserable, and seeing the full trace turns mysterious failures into specific ones. Observability is a major theme of Topic 47.
+
+## When to use LangChain (and when not)
+
+LangChain shines when you are assembling standard patterns quickly, want its integrations (many loaders and vector stores), or value its prebuilt chains and agents. It is less ideal when you need fine-grained control, when its abstractions obscure behaviour you must understand, or when a few raw API calls would be simpler and clearer than learning the framework's way. The mature stance: use LangChain (or any framework) where it removes real boilerplate, but never let it prevent you from understanding what is actually happening — and be willing to drop to raw calls when the abstraction fights you. Because you learned the fundamentals first, you can make this judgment well.
+
+## Prompt templates and output parsers in depth
+
+Two of LangChain's most-used building blocks deserve a closer look, because they solve problems every LLM application faces. **Prompt templates** turn prompts into reusable, parameterized objects: instead of f-string-ing variables into a prompt scattered through your code, you define a template once with named slots and fill them at call time. This centralizes prompt text (so it can be reviewed and versioned), supports few-shot example injection, and handles the chat-format role markers (system, user, assistant) the model expects. It is the disciplined prompt-as-data practice from Topic 31, packaged.
+
+**Output parsers** solve the reverse problem: turning the model's text response back into structured data your code can use. A parser can coerce the output into JSON, a Pydantic object, a list, or a custom format, and crucially it can *instruct the model* how to format its output and then *validate and retry* if the model deviates. This closes the loop on structured output — the parser tells the model the expected shape, reads the response, and re-prompts on a parse failure — which is more robust than hoping the model returns clean JSON. Together, templates and parsers bracket every model call with a clean input contract and a clean output contract, and they are a large part of what makes a framework worth using even for otherwise-simple applications: they turn the messy reality of prompt strings and free-text responses into typed, testable interfaces.
+
+## The ecosystem and its evolution
+
+LangChain is not a single library but an evolving ecosystem, and understanding its shape helps you navigate it. Over time it split into focused packages: a core with the base abstractions and LCEL, provider-specific integration packages (one per model provider and vector store), a community package for the long tail of integrations, and LangGraph for stateful agents. This modularization happened because the original monolith grew unwieldy, and it reflects a healthy maturation — you install only the pieces you need rather than a giant dependency.
+
+This rapid evolution is also a caution. LangChain has changed its recommended patterns more than once — the move to LCEL, the rise of LangGraph for agents — which means tutorials and code age quickly, and the "right" way to do something this year may differ from last year's. The practical guidance is to follow current official documentation rather than older blog posts, prefer the newer LCEL and LangGraph patterns over deprecated chain classes, and not be surprised when an example from a year ago no longer matches the current API. This churn is the cost of a fast-moving ecosystem in a fast-moving field, and it is one more reason that understanding the *fundamentals* underneath the framework — what a chain, a retriever, a tool loop actually is — protects you: when the framework's surface changes, your understanding of what it is doing does not, and you can adapt quickly rather than relearning from scratch.
+
+## The framework debate
+
+There is a genuine, ongoing debate in the community about whether to use heavy frameworks like LangChain at all, and engaging with it honestly makes you a better engineer. The case *for* frameworks: they provide battle-tested implementations of common patterns, a huge library of integrations, observability tooling, and a shared vocabulary, letting small teams build sophisticated applications fast. The case *against*: they add abstraction layers that can obscure what is happening, make debugging harder, introduce their own concepts to learn, and sometimes make simple things complicated — a few direct API calls can be clearer than wiring up framework objects.
+
+The resolution is not dogmatic but contextual. For rapid prototyping and standard patterns with many integrations, a framework often wins. For a focused production system where you need full control and clarity, raw API calls plus a few small utilities you understand completely may be better. Many experienced teams use frameworks selectively — adopting the parts that genuinely help (a document loader, an observability integration) while keeping their core logic in plain code they control. The worst outcome is using a framework as a substitute for understanding, so that when something breaks you cannot diagnose it because you never knew what it was doing. Because this curriculum built the fundamentals first — agents, tool use, and RAG from scratch — you are equipped to use frameworks as the accelerators they are meant to be, judging each abstraction on whether it removes real work or merely hides necessary understanding. That judgment, more than fluency in any particular framework's API, is the durable skill.
+
+## Code Example
+
+The code builds a complete RAG pipeline with LCEL — retriever, prompt, model, parser composed with pipes — in just a few lines, showing the framework's conciseness for standard patterns.
+
+<CodeBlock lang="python" filename="langchain_rag.py" code={`# langchain_rag.py
+# pip install langchain langchain-anthropic langchain-community sentence-transformers faiss-cpu
+from langchain_community.vectorstores import FAISS
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_anthropic import ChatAnthropic
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+
+# --- Build a vector store from documents (indexing) ---
+docs = [
+    "LangChain composes LLM components with the LCEL pipe operator.",
+    "A Runnable supports invoke, stream, and batch out of the box.",
+    "LangSmith traces every step of a chain for debugging.",
+]
+embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+store = FAISS.from_texts(docs, embeddings)
+retriever = store.as_retriever(search_kwargs={"k": 2})
+
+# --- Compose a RAG chain with LCEL (retriever | prompt | model | parser) ---
+prompt = ChatPromptTemplate.from_template(
+    "Answer using only this context:\\n{context}\\n\\nQuestion: {question}")
+model = ChatAnthropic(model="claude-opus-4-8", max_tokens=300)
+
+def format_docs(docs):
+    return "\\n".join(d.page_content for d in docs)
+
+rag_chain = (
+    {"context": retriever | format_docs, "question": RunnablePassthrough()}
+    | prompt
+    | model
+    | StrOutputParser()
+)
+
+# invoke / stream / batch all work because everything is a Runnable
+print(rag_chain.invoke("What does the LCEL pipe operator do?"))
+
+# Expected:
+# The LCEL pipe operator (|) composes components into a pipeline, feeding
+# the output of one component as the input to the next.
+`} />
+
+The entire RAG pipeline is a single LCEL expression: retrieve and format the context, pass the question through, build the prompt, call the model, parse the output — composed with pipes and readable left to right. Because every piece is a Runnable, this same `rag_chain` supports `.invoke()`, `.stream()`, and `.batch()` with no extra code. This conciseness for standard patterns is LangChain's real value; the next topic, LangGraph, handles the complex stateful agents that outgrow linear chains. The contrast is instructive: a linear RAG chain flows in one direction and fits an LCEL pipe perfectly, but an agent that loops, branches on conditions, and revisits earlier state needs a fundamentally different structure than a pipeline — which is exactly the gap LangGraph was built to fill.
+
+<KeyTakeaways phase={5}>
+- **LangChain** assembles LLM applications from composable, interoperable components — models, prompts, parsers, retrievers, tools, memory — plus many integrations.
+- **LCEL** composes components with the pipe `|` operator into declarative pipelines (e.g. `retriever | prompt | model | parser`), read left to right.
+- Everything is a **Runnable**, so every pipeline gets **invoke, stream, and batch** for free.
+- It provides **document loaders, text splitters, vector-store integrations, retrievers, and prebuilt chains/agents** (`create_react_agent`) for standard patterns.
+- **LangSmith** traces every step for debugging — essential observability for chains and agents.
+- Use frameworks where they remove real boilerplate, but **keep understanding what happens underneath** and drop to raw calls when you need control.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "What does the LCEL pipe operator (|) do?",
+    options: ["Runs components in parallel", "Composes components into a pipeline, feeding one component's output as the next's input", "Trains the model", "Splits documents"],
+    correctIndex: 1,
+    explanation: "Like a Unix pipe, LCEL's | chains components so the output of one becomes the input of the next, e.g. retriever | prompt | model | parser, read left to right."
+  },
+  {
+    question: "Because every LangChain component is a Runnable, what do you get automatically?",
+    options: ["Free model training", "invoke, stream, and batch execution methods on any pipeline", "Automatic fine-tuning", "A bigger context window"],
+    correctIndex: 1,
+    explanation: "The Runnable interface provides invoke (single run), stream (incremental output), and batch (efficient many-input) for free, so any chain you build supports all three without extra code."
+  },
+  {
+    question: "What is the balanced view on using a framework like LangChain?",
+    options: ["Always use it for everything", "Use it where it removes real boilerplate, but keep understanding the underlying behaviour and drop to raw calls when you need control", "Never use frameworks", "It replaces the need to learn fundamentals"],
+    correctIndex: 1,
+    explanation: "Frameworks accelerate standard patterns but add indirection. Use them for convenience while retaining understanding of what happens underneath, and use raw API calls when fine-grained control or clarity matters more."
+  }
+]} />
+
+## What's Next
+
+Linear chains break down for agents that loop, branch, maintain state, and need human-in-the-loop control. In **LangGraph — Stateful Multi-step Agents**, we study the graph-based framework built for exactly these complex, cyclic agent workflows.

@@ -1,0 +1,179 @@
+---
+title: "Chunking & Embedding Strategies"
+subtitle: "How you split and represent documents determines everything in RAG"
+phase: 4
+topicNumber: 34
+slug: "chunking-embedding"
+readingTime: 15
+prerequisites: ["intro-to-rag"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('chunking-embedding');
+
+<TopicHero topic={topic} />
+
+A RAG system can only retrieve what it indexed, and *how* you split and represent your documents during indexing silently determines everything downstream. Chunk too small and a fact loses its context; chunk too large and the relevant sentence drowns in noise. Choose a weak embedding model and semantically related text never lands near the query. These indexing decisions — chunking and embedding — are made once, ahead of time, and they cap the quality of every answer your system can ever give. This topic treats them with the seriousness they deserve.
+
+We cover the chunking strategies (fixed-size, sentence, recursive, semantic, structure-aware), how to choose a chunk size, the landscape of embedding models and how to pick one using the MTEB leaderboard, and efficient batch embedding. The code compares chunking strategies and embeds the results.
+
+## Why chunking matters
+
+You cannot embed an entire 50-page document as one vector — it would blur dozens of distinct topics into one muddy point, useless for retrieval. So you **chunk**: split documents into passages, embed each separately, and retrieve at the chunk level. The chunk size is a fundamental trade-off. **Too small** (a sentence) and each chunk lacks the surrounding context needed to be meaningful or to fully answer a question. **Too large** (a whole page) and a chunk covers many topics, so its single embedding is diffuse and the relevant sentence is diluted by irrelevant text, hurting retrieval precision. The art is finding the size where each chunk is a coherent, self-contained unit of meaning.
+
+## Fixed-size chunking
+
+The simplest strategy splits text into chunks of a fixed number of characters or tokens, with some **overlap** between consecutive chunks. Overlap matters: without it, a sentence straddling a chunk boundary gets cut in half, and neither chunk contains the whole thought; overlapping by, say, 10-20% ensures boundary-spanning content appears intact in at least one chunk. Fixed-size chunking is fast and simple but ignores the document's structure — it will happily cut mid-sentence or mid-paragraph.
+
+<Callout type="tip">
+Always use overlap with fixed-size chunking. A key fact that lands exactly on a chunk boundary would otherwise be split across two chunks, leaving neither able to answer a question about it. Overlap is cheap insurance against boundary loss.
+</Callout>
+
+## Sentence and recursive chunking
+
+**Sentence-level chunking** splits on sentence boundaries (using NLTK or spaCy), keeping sentences intact, then groups sentences up to a target size. It respects the smallest natural units of meaning. **Recursive character splitting** — LangChain's default — is smarter: it tries to split on a hierarchy of separators (paragraphs first, then sentences, then words) so that chunks break at the most natural available boundary while respecting a size limit. Recursive splitting is a strong general-purpose default because it keeps semantically related text together far better than blind fixed-size cuts.
+
+## Semantic and structure-aware chunking
+
+**Semantic chunking** goes further: it embeds sentences and places a chunk boundary where the topic *shifts* — detected by a drop in similarity between consecutive sentences. This produces chunks that are genuinely about one thing, at the cost of extra embedding computation during indexing. **Structure-aware chunking** uses the document's own structure: split a Markdown file at headings, an HTML page at sections, code at function boundaries. When documents have clear structure, respecting it yields the most coherent chunks of all, because the author already organized the content into logical units.
+
+## Chunk size guidelines
+
+Common chunk sizes are 256, 512, or 1024 tokens, and the right choice depends on your content and queries. **Smaller chunks** (256) give precise retrieval — the matched chunk is tightly on-topic — but may lack context to answer fully. **Larger chunks** (1024) carry more context but retrieve less precisely. A frequent pattern is to retrieve small, precise chunks but then expand to their surrounding context before generation (parent-child retrieval, Topic 36). There is no universal best; you tune chunk size against your actual retrieval quality, treating it as a hyperparameter.
+
+## Embedding models
+
+The embedder turns each chunk (and each query) into a vector, and its quality determines whether semantically related text actually lands nearby. Options range widely. **Sentence-transformers** offers open models like `all-MiniLM-L6-v2` (small and fast) and `all-mpnet-base-v2` (larger, higher quality). **Commercial APIs** like OpenAI's `text-embedding-3` series offer strong quality with no hosting. **Open models** like E5, BGE, and Nomic-embed are competitive and self-hostable. The embedder must be the *same* for indexing and querying — query and document vectors must live in the same space — and bigger embedding models generally retrieve better but cost more to run.
+
+## Choosing with MTEB
+
+How do you pick an embedding model? The **MTEB (Massive Text Embedding Benchmark)** leaderboard compares embedding models across dozens of retrieval and similarity tasks, and it is the standard reference. But do not just take the top model blindly: consider the trade-offs of embedding dimension (bigger vectors cost more storage and search time), sequence length (can it embed your chunk sizes?), speed, and whether it was trained on text like yours. A model that tops MTEB on general text may underperform a specialized one on your domain. As always, validate on your own data.
+
+<ComparisonTable
+  phase={4}
+  headers={["Strategy", "How it splits", "Pros", "Cons"]}
+  rows={[
+    ["Fixed-size", "N tokens/chars with overlap", "Simple, fast, predictable", "Ignores structure, cuts mid-thought"],
+    ["Sentence-level", "On sentence boundaries", "Keeps sentences intact", "Sentences may be too small alone"],
+    ["Recursive", "Hierarchy of separators", "Strong general default", "Still size-driven, not meaning-driven"],
+    ["Semantic", "Where topic shifts (embeddings)", "Coherent, on-topic chunks", "Extra compute at indexing"],
+    ["Structure-aware", "Headings / sections / functions", "Respects authored structure", "Needs structured documents"],
+  ]}
+  caption="Chunking strategies trade simplicity against coherence."
+/>
+
+## Batch embedding
+
+When indexing a large corpus, embed chunks in **batches** rather than one at a time — embedding models run far more efficiently on batches, since the work parallelizes across the GPU. Batching can turn an hours-long indexing job into minutes. For very large corpora, also consider that indexing is a one-time (or incremental) cost, so it is worth doing carefully and efficiently up front.
+
+## Metadata: what to store alongside each chunk
+
+A chunk is more than its text. When you index a chunk, you should also store **metadata** with it — the source document, a title, a section heading, a date, an author, a URL, a page number. This metadata is invaluable at query time for two reasons. First, **filtering**: you can restrict retrieval to chunks matching certain criteria (only documents from this year, only this customer's data, only the policy section), which both improves relevance and is often required for security and access control. Second, **citation**: returning the source and location lets your application show users *where* an answer came from, which is essential for trust and verification in any serious RAG product.
+
+A particularly useful pattern is to prepend contextual metadata into the chunk text itself before embedding — for example, including the document title and section heading at the top of each chunk. This "contextual chunking" gives the embedding model crucial context it would otherwise lack: a chunk that says "It expires after 30 days" is ambiguous alone, but "Refund Policy > Returns: It expires after 30 days" embeds far more usefully and retrieves more accurately. The small cost of carrying metadata pays off repeatedly, and designing your chunk schema — what text, what metadata, in what format — is as much a part of building good RAG as the chunking algorithm itself. Treat each chunk as a small structured record, not just a string.
+
+## Evaluating chunking and embedding choices
+
+Because chunking and embedding decisions are made blind, ahead of any query, the only honest way to choose among them is to **measure retrieval quality** on a representative set of question-answer pairs. Build a small evaluation set where you know which chunk *should* be retrieved for each question, then for each candidate configuration — this chunk size, that embedding model — measure how often the correct chunk appears in the top-k results. Metrics like recall@k (is the right chunk in the top k?) and mean reciprocal rank (how high did it rank?) turn vague intuitions into numbers you can optimize.
+
+This retrieval-level evaluation is faster and more diagnostic than judging final answers, because it isolates the retrieval stage from the generation stage. If the right chunk is never retrieved, no amount of prompt tuning on the generator will fix the answer — the problem is upstream, in chunking or embedding. Running this evaluation across a grid of chunk sizes and a few embedding models is one of the highest-value things you can do when building a RAG system, and it routinely overturns intuitions: the chunk size that "feels right" is often not the one that retrieves best for your actual queries. The discipline is the same one from prompt engineering — measure, do not guess — applied to the indexing half of the pipeline.
+
+## Multi-vector and specialized embeddings
+
+Standard RAG represents each chunk as a single vector, but richer schemes exist and are worth knowing as your needs grow. **Multi-vector** approaches (such as ColBERT-style late interaction) represent a chunk as *many* token-level vectors and match at the token level, capturing fine-grained relevance that a single pooled vector misses, at the cost of more storage and a more complex search. **Specialized embeddings** are trained for particular domains or modalities — code-specific embedders that understand programming-language semantics, multilingual embedders that place translations near each other, or multimodal embedders that put images and their captions in a shared space for cross-modal retrieval.
+
+The practical lesson is that "embed the chunk into a vector" is a default, not a law. For most applications a single good general-purpose embedding is the right starting point and gets you remarkably far. But when retrieval quality plateaus and matters enough, the embedding representation itself is a lever: a domain-specialized model, a multi-vector scheme, or contextual chunk augmentation can each unlock a step-change in what your retriever can find. Knowing these options exist means that when a general embedder underperforms on your specialized corpus — legal text, source code, scientific papers, a low-resource language — you have somewhere to go beyond simply trying a bigger general model. The representation of your knowledge is as much a design choice as the chunking that produces it, and the two together determine the raw material every later stage of RAG has to work with.
+
+## Code Example
+
+The code compares fixed-size and recursive chunking on the same document, then embeds the chunks in a batch with sentence-transformers and reports the statistics that guide tuning.
+
+<CodeBlock lang="python" filename="chunking_embedding.py" code={`# chunking_embedding.py
+# pip install sentence-transformers langchain-text-splitters
+from langchain_text_splitters import (
+    CharacterTextSplitter, RecursiveCharacterTextSplitter)
+from sentence_transformers import SentenceTransformer
+
+document = (
+    "Retrieval-augmented generation grounds an LLM in external knowledge. "
+    "First, documents are split into chunks. Each chunk is embedded into a vector. "
+    "At query time, the question is embedded and the nearest chunks are retrieved. "
+    "The retrieved chunks are inserted into the prompt as context. "
+    "Finally, the model generates an answer grounded in that context."
+) * 4  # repeat to make a longer document
+
+# --- Fixed-size chunking with overlap ---
+fixed = CharacterTextSplitter(
+    chunk_size=200, chunk_overlap=40, separator=" ")
+fixed_chunks = fixed.split_text(document)
+
+# --- Recursive chunking (tries paragraphs -> sentences -> words) ---
+recursive = RecursiveCharacterTextSplitter(
+    chunk_size=200, chunk_overlap=40,
+    separators=["\\n\\n", ". ", " ", ""])
+rec_chunks = recursive.split_text(document)
+
+for name, chunks in [("fixed", fixed_chunks), ("recursive", rec_chunks)]:
+    sizes = [len(c) for c in chunks]
+    print(f"{name}: {len(chunks)} chunks, "
+          f"avg size {sum(sizes)//len(sizes)} chars")
+
+# --- Batch-embed the recursive chunks ---
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
+vecs = embedder.encode(rec_chunks, batch_size=32, normalize_embeddings=True)
+print(f"\\nembedded {len(rec_chunks)} chunks -> shape {vecs.shape}")
+print("embedding dimension:", vecs.shape[1])   # 384 for MiniLM
+
+# Expected (approx):
+# fixed: ~12 chunks, avg size ~190 chars
+# recursive: ~12 chunks, avg size ~185 chars
+# embedded 12 chunks -> shape (12, 384)
+# embedding dimension: 384
+`} />
+
+The comparison shows recursive splitting producing similarly-sized chunks but breaking at sentence boundaries rather than arbitrary character positions, so each chunk reads as a coherent unit. The batch embedding turns the chunks into a matrix of 384-dimensional vectors ready to index. These vectors are the substance of your retrieval system — their quality, and the coherence of the chunks they represent, set the ceiling on everything the RAG system can retrieve and therefore answer.
+
+<KeyTakeaways phase={4}>
+- **Chunking and embedding are made once at indexing time and cap RAG quality forever** — they decide what can ever be retrieved.
+- Chunk size is a trade-off: **too small** loses context, **too large** dilutes the relevant text. Common sizes: 256/512/1024 tokens.
+- **Fixed-size** chunking needs **overlap** to avoid splitting facts at boundaries; **recursive** splitting (split on a separator hierarchy) is a strong general default.
+- **Semantic** chunking breaks where topics shift; **structure-aware** chunking respects headings, sections, and code boundaries for the most coherent chunks.
+- The **embedder** must be identical for indexing and querying; choose using the **MTEB** leaderboard but validate on your domain and weigh dimension, length, and speed.
+- **Batch-embed** large corpora for efficiency; indexing is a one-time cost worth doing carefully.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Why do we use overlap in fixed-size chunking?",
+    options: ["To make chunks larger", "So a fact that spans a chunk boundary still appears intact in at least one chunk", "To reduce the number of chunks", "To speed up embedding"],
+    correctIndex: 1,
+    explanation: "Without overlap, content straddling a boundary is split across two chunks, leaving neither able to answer a question about it. Overlapping consecutive chunks ensures boundary-spanning text appears whole somewhere."
+  },
+  {
+    question: "What is the trade-off in choosing chunk size?",
+    options: ["Bigger is always better", "Smaller chunks retrieve precisely but lack context; larger chunks carry context but dilute the relevant text", "Size has no effect on retrieval", "Only the embedding model matters"],
+    correctIndex: 1,
+    explanation: "Small chunks give tight, on-topic retrieval but may miss surrounding context needed to answer; large chunks include context but blur the relevant sentence into a diffuse embedding, hurting precision."
+  },
+  {
+    question: "Why must the embedding model be the same for indexing and querying?",
+    options: ["For speed", "Because query and document vectors must live in the same space to be comparable", "To save memory", "It doesn't have to be the same"],
+    correctIndex: 1,
+    explanation: "Retrieval compares the query vector to document vectors by similarity. Different embedding models produce incompatible vector spaces, so query and documents must be embedded by the same model."
+  }
+]} />
+
+## What's Next
+
+Once documents are chunked and embedded into vectors, you need somewhere to store millions of them and search them in milliseconds. In **Vector Databases & Retrieval Methods**, we study the databases and algorithms — HNSW, FAISS, Chroma, Qdrant — that make fast similarity search over huge collections possible.

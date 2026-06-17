@@ -1,0 +1,204 @@
+---
+title: "Prompt Engineering — Zero-shot, Few-shot & CoT"
+subtitle: "Talking to LLMs effectively — the skill every AI engineer needs"
+phase: 4
+topicNumber: 31
+slug: "prompt-engineering"
+readingTime: 14
+prerequisites: ["llm-evolution"]
+hasCode: true
+hasMath: false
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('prompt-engineering');
+
+<TopicHero topic={topic} />
+
+Phase 3 built the models; Phase 4 is about *using* them well. The most immediate skill is **prompt engineering**: designing the text you send a model to reliably get the behaviour you want. Because a modern LLM is a single next-token predictor whose latent abilities are selected by context (Topic 20), the prompt is your primary control surface — no fine-tuning, no gradients, just words. A well-crafted prompt can be the difference between a flaky demo and a dependable product, and the techniques are simple enough to learn quickly yet deep enough to keep paying off.
+
+This topic covers the core repertoire: zero-shot and few-shot prompting, the chain-of-thought trick that unlocks reasoning, the anatomy of a good instruction, system prompts, controlling output format, and the failure modes you will inevitably hit. The code shows each technique against a real model using current best practices.
+
+## What is prompt engineering?
+
+Prompt engineering is the practice of designing model inputs — instructions, examples, context, and formatting — to elicit desired outputs. It exploits in-context learning: the model adapts its behaviour based on what it sees in the prompt, with no weight updates. The craft lies in being clear, specific, and structured, and in understanding how the model interprets what you write. It is part science (there are reliable patterns) and part empiricism (you test and iterate against real outputs).
+
+## Zero-shot prompting
+
+**Zero-shot** prompting gives the model only a task description, no examples: "Classify the sentiment of this review as positive or negative: 'I loved it.'" Modern instruction-tuned models are remarkably capable zero-shot, because instruction tuning (Topic 25) taught them to follow descriptions. Zero-shot is the simplest approach and often sufficient; always try it first before adding complexity.
+
+## Few-shot prompting
+
+**Few-shot** prompting includes a handful of input-output examples before the actual query, demonstrating the task by example: show three labelled reviews, then ask about a fourth. This is direct in-context learning and helps when the task is unusual, the desired format is specific, or zero-shot is unreliable. The examples teach the model both *what* to do and *how* to format the answer.
+
+## How many examples?
+
+More examples are not always better. One to five well-chosen, *diverse* examples usually capture most of the benefit; beyond that, returns diminish and you spend context (and money) for little gain. The examples should be representative of the real distribution and cover edge cases, and their *format must be consistent* — the model imitates the pattern, including mistakes. A single confusingly-formatted example can do more harm than three good ones.
+
+<Callout type="tip">
+Few-shot examples are imitation targets. The model copies their format, style, and even their errors. Curate them as carefully as training data: diverse, correct, and consistently formatted.
+</Callout>
+
+## Chain-of-Thought
+
+**Chain-of-Thought (CoT)** prompting asks the model to show its reasoning before giving an answer. For multi-step problems — arithmetic, logic, planning — this dramatically improves accuracy, because generating intermediate steps lets the model work through the problem rather than guessing an answer in one leap. The famous trigger is simply appending "Let's think step by step," which turns a wrong one-shot answer into a correct reasoned one on many tasks. CoT is one of the highest-leverage prompting techniques.
+
+## Zero-shot vs few-shot CoT
+
+There are two flavours. **Zero-shot CoT** just adds the "think step by step" instruction and lets the model generate its own reasoning. **Few-shot CoT** provides examples that *include* worked reasoning, teaching the model both to reason and how to structure that reasoning. Few-shot CoT is usually stronger for hard, domain-specific problems, while zero-shot CoT is a cheap, general win. Note that the strongest modern reasoning models do extended internal reasoning by default, lessening the need for explicit CoT prompting — but the technique remains valuable and instructive.
+
+## Instruction format best practices
+
+Good prompts share a structure. State the **role or context** ("You are an expert editor"). Give a **clear, specific instruction** (what to do, not just the topic). Specify the **output format** explicitly (JSON, a list, a single word). State **constraints** (length, tone, what to avoid). Provide **the input** clearly delimited from the instructions. Vague prompts get vague answers; the more precisely you specify the task and its output, the more reliable the result.
+
+## System prompts and output control
+
+The **system prompt** sets persistent behaviour for the whole conversation — role, tone, rules — and the model is trained to weight it above ordinary user turns. Use it to establish the assistant's character and hard constraints. For **output format control**, you can ask for JSON directly, but the robust approach is structured outputs or *tool use*: define a schema and have the model fill it, guaranteeing parseable results. Free-form "respond in JSON" works but can occasionally produce malformed output; schema-enforced tool use is far more reliable for production.
+
+<ComparisonTable
+  phase={4}
+  headers={["Technique", "What you provide", "Best for", "Cost"]}
+  rows={[
+    ["Zero-shot", "Task description only", "Simple, common tasks", "Lowest"],
+    ["Few-shot", "A few input-output examples", "Unusual tasks, specific formats", "More tokens"],
+    ["Zero-shot CoT", "'Think step by step'", "Reasoning, math, logic", "More output tokens"],
+    ["Few-shot CoT", "Examples with worked reasoning", "Hard, domain-specific reasoning", "Most tokens"],
+  ]}
+  caption="When to reach for each prompting technique."
+/>
+
+## Common failure modes
+
+Watch for these. **Ambiguity**: if you are unsure what the prompt asks, so is the model. **Over-stuffing**: cramming too many instructions causes some to be ignored; split complex tasks. **Format drift**: without a strict schema, output format wanders. **Leading examples**: biased few-shot examples skew answers. **Hallucination**: the model invents facts when it lacks them — mitigated by retrieval (next topics) and by instructing it to say "I don't know." Most prompt failures trace back to under-specification, and the fix is usually to be more explicit.
+
+## Prompt templates and variables
+
+In real applications you rarely write one-off prompts; you write **templates** with variable slots that get filled at runtime. A support-bot prompt might be "You are a support agent for \{company\}. The customer wrote: \{message\}. Respond helpfully in under \{limit\} words." Treating prompts as parameterized templates — version-controlled, tested, and reused — is what separates a hobby script from a maintainable system. It lets you change the wording in one place, A/B test variants, and keep the structure consistent across thousands of calls.
+
+A few template disciplines pay off. Clearly **delimit** the user-supplied content from your instructions, using a consistent marker (XML-style tags, triple quotes, or a labelled section), so the model never confuses data for commands — and so that user input cannot easily hijack the instructions, a security concern we revisit with prompt injection. Keep the **variable content separate** from the fixed scaffolding, both for clarity and so you can sanitize or truncate the variable parts independently. And store prompts as **data, not buried string literals**, so they can be reviewed, edited by non-engineers, and evaluated systematically. A prompt template is a piece of software; the more you treat it like one, the more reliable your application becomes.
+
+## Iterating on prompts systematically
+
+Prompt engineering is empirical, which means it should be *measured*, not guessed. The disciplined loop is to assemble a small evaluation set of representative inputs with known good outputs, run a candidate prompt against all of them, and score the results — by exact match where possible, or by an LLM-as-judge for open-ended tasks (Topic 37). Change one thing, re-run, and keep the change only if the score improves. This turns prompt tuning from superstition into engineering.
+
+The reason this matters is that prompts interact with the model in non-obvious ways, and a change that helps one input can quietly break another. Without a held-out evaluation set you are flying blind, optimizing against a handful of examples you happen to remember and overfitting to them. Even a dozen well-chosen test cases dramatically improves your ability to tell a real improvement from a lucky one. As your application grows, this evaluation set becomes one of your most valuable assets — a regression suite for behaviour that no unit test can capture. The habit of evaluating prompts the way you evaluate code is one of the clearest markers of a mature LLM practitioner, and it is the same discipline that scales up into the formal evaluation methods later in this phase.
+
+## Prompting modern reasoning models
+
+A recent shift deserves explicit mention because it changes some of the advice above. The strongest current models perform extended internal reasoning by default — they "think" before answering without being told to — which reduces the need for explicit chain-of-thought prompting on hard problems. For these models, heavy-handed "let's think step by step" scaffolding can even be redundant or counterproductive, and the better approach is to state the problem clearly, specify the desired output, and let the model's built-in reasoning do the work.
+
+The broader principle is that prompting advice is not timeless; it tracks the models. Few-shot examples mattered more when zero-shot instruction-following was weaker; elaborate CoT scaffolding mattered more before models reasoned by default. As models improve, the burden shifts from the prompt engineer toward the model, and prompts get simpler — clearer instructions, less manual scaffolding. This does not make prompt engineering obsolete; clarity, specificity, structured output, and good context will always matter. But it does mean you should periodically revisit prompts built for older models, because techniques that were essential a year ago may now be unnecessary complexity. Defaulting to the most capable current model and giving it a clean, well-specified prompt is, increasingly, both the simplest and the best approach.
+
+## Where you put things in the prompt matters
+
+A practical subtlety that surprises beginners: the *position* of information within a long prompt affects how well the model uses it. Models attend most reliably to the beginning and the end of their context and can overlook material buried in the middle — the so-called "lost in the middle" effect. When a prompt contains a long document plus an instruction, placing the key instruction at the very end (after the document) often works better than burying it before a wall of text, because the model reads the instruction freshest. Similarly, the most important constraints belong in the system prompt or at the start, where they anchor the whole response.
+
+This positional sensitivity becomes critical as prompts grow into the retrieval-augmented and agentic territory ahead, where you may stuff thousands of tokens of retrieved context into a prompt. Knowing that the middle is the weakest position guides how you order retrieved chunks, where you put the user's actual question relative to the context, and how you structure long system prompts. It is a small, concrete instance of a general truth: a prompt is not a bag of words the model weighs equally, but a structured input whose layout shapes the output. Treating prompt layout as a deliberate design choice, rather than dumping everything in whatever order is convenient, is a cheap way to make long-context prompts more reliable.
+
+## Code Example
+
+The code compares zero-shot, few-shot, and chain-of-thought on the same reasoning problem against a current Claude model, and shows schema-enforced structured output via tool use.
+
+<CodeBlock lang="python" filename="prompting.py" code={`# prompting.py
+# pip install anthropic
+import os
+from anthropic import Anthropic
+
+client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+MODEL = "claude-opus-4-8"   # default to the latest, most capable model
+
+def ask(prompt, system=None):
+    msg = client.messages.create(
+        model=MODEL, max_tokens=512,
+        system=system or "You are a careful, concise assistant.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return msg.content[0].text
+
+problem = ("A shop sells pens at 3 for $2. How much do 12 pens cost?")
+
+# Zero-shot: just ask
+print("ZERO-SHOT:", ask(problem))
+
+# Zero-shot CoT: invite reasoning
+print("\\nZERO-SHOT CoT:", ask(problem + " Let's think step by step."))
+
+# Few-shot: demonstrate the format
+few = (
+    "Q: 5 apples cost $10. Cost of 15 apples? A: 15/5 = 3 groups; 3 x $10 = $30.\\n"
+    "Q: " + problem + " A:"
+)
+print("\\nFEW-SHOT:", ask(few))
+
+# Structured output via tool use (schema-enforced, always parseable)
+tool = {
+    "name": "record_answer",
+    "description": "Record the final numeric answer and reasoning.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "reasoning": {"type": "string"},
+            "answer_usd": {"type": "number"},
+        },
+        "required": ["reasoning", "answer_usd"],
+    },
+}
+msg = client.messages.create(
+    model=MODEL, max_tokens=512, tools=[tool],
+    tool_choice={"type": "tool", "name": "record_answer"},
+    messages=[{"role": "user", "content": problem}],
+)
+structured = next(b.input for b in msg.content if b.type == "tool_use")
+print("\\nSTRUCTURED:", structured)
+
+# Expected:
+# ZERO-SHOT: $8
+# ZERO-SHOT CoT: 12 pens = 4 groups of 3; 4 x $2 = $8.
+# FEW-SHOT: 12/3 = 4 groups; 4 x $2 = $8.
+# STRUCTURED: {'reasoning': '12 pens = 4 groups of 3 ...', 'answer_usd': 8}
+`} />
+
+The comparison shows each technique's character: zero-shot gives a terse answer, CoT exposes the reasoning (which catches errors on harder problems), and few-shot enforces a worked format. The tool-use call is the production pattern for structured data — by forcing the model to fill a schema, you get a guaranteed-parseable object every time, no fragile JSON parsing. Master these and you have the foundation for everything in Phase 4, from RAG to agents.
+
+<KeyTakeaways phase={4}>
+- The **prompt is your primary control surface** — it selects the model's latent abilities via in-context learning, no fine-tuning needed.
+- **Zero-shot** (description only) suits simple tasks; **few-shot** (examples) helps unusual tasks and specific formats — examples are imitation targets, so curate them.
+- **Chain-of-Thought** ("think step by step") dramatically improves multi-step reasoning by generating intermediate steps before the answer.
+- Good prompts specify **role, instruction, output format, constraints, and clearly delimited input**; vague prompts get vague answers.
+- **System prompts** set persistent behaviour; **tool use / structured outputs** give reliable, schema-enforced results far better than free-form "respond in JSON."
+- Most failures stem from **under-specification**; be explicit, and instruct the model to admit uncertainty to reduce hallucination.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "When does few-shot prompting most clearly beat zero-shot?",
+    options: ["Always", "When the task is unusual or needs a specific output format the model must imitate", "Only for translation", "When you have no examples"],
+    correctIndex: 1,
+    explanation: "Few-shot shines when the task is uncommon or the desired format is specific, because the examples demonstrate exactly what and how. For simple, common tasks, instruction-tuned models are often great zero-shot."
+  },
+  {
+    question: "Why does Chain-of-Thought prompting improve reasoning tasks?",
+    options: ["It makes the model larger", "Generating intermediate steps lets the model work through the problem instead of guessing an answer in one leap", "It removes the need for a prompt", "It uses a different tokenizer"],
+    correctIndex: 1,
+    explanation: "By producing reasoning steps before the final answer, the model decomposes the problem and conditions each step on the last, which is far more reliable than emitting an answer directly for multi-step problems."
+  },
+  {
+    question: "What is the most reliable way to get structured (parseable) output?",
+    options: ["Ask politely for JSON", "Use schema-enforced tool use / structured outputs", "Use a bigger model only", "Lower the temperature to 0"],
+    correctIndex: 1,
+    explanation: "Free-form 'respond in JSON' can occasionally produce malformed output. Defining a schema and having the model fill it via tool use guarantees a parseable object, which is the production-grade approach."
+  }
+]} />
+
+## What's Next
+
+Basic prompting handles most tasks, but the hardest problems need more structure. In **Advanced Prompting — Self-Consistency, ToT & ReAct**, we go beyond single prompts to multi-path reasoning, tree search over thoughts, and the reason-act loop that turns a language model into an agent.

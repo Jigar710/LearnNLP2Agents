@@ -1,0 +1,190 @@
+---
+title: "Seq2Seq Architecture"
+subtitle: "The architecture behind translation, summarization, and chatbots"
+phase: 1
+topicNumber: 10
+slug: "seq2seq"
+readingTime: 16
+prerequisites: ["rnn-lstm-gru"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+
+export const topic = getTopicBySlug('seq2seq');
+
+<TopicHero topic={topic} />
+
+Translating a sentence, summarizing a document, answering a question — these tasks take one sequence as input and produce a *different* sequence as output, often of different length. The **sequence-to-sequence (Seq2Seq)** architecture solved this with an elegant idea: one network (the **encoder**) reads the input into a summary vector, and a second network (the **decoder**) generates the output from that summary. Seq2Seq powered the first wave of neural machine translation and is the conceptual parent of every encoder-decoder model since. But it had a critical flaw — the information bottleneck — whose fix, *attention*, opens the next phase and reshaped the entire field. This topic is the capstone of Phase 1 and the bridge to Phase 2.
+
+We will build the encoder-decoder architecture, see how the context vector summarizes the input, confront the bottleneck problem, study autoregressive decoding with teacher forcing and beam search, and understand exactly why Seq2Seq struggles with long sequences — the motivation for attention.
+
+## The sequence-to-sequence problem
+
+Many tasks map an input sequence to an output sequence where the two differ in length and have no one-to-one alignment. English "I am hungry" becomes French "j'ai faim" — three words to two, with reordering. A 1,000-word article becomes a 50-word summary. A standard model that maps fixed input to fixed output cannot handle this **variable-length, unaligned** mapping. Seq2Seq's insight is to *decouple* reading from writing: fully read the input first, then generate the output, so the two sequences need not have the same length or alignment.
+
+## The encoder-decoder architecture
+
+A Seq2Seq model has two RNNs (typically LSTMs). The **encoder** reads the input sequence one token at a time, updating its hidden state, and its *final* hidden state becomes a fixed-size **context vector** — a summary of the entire input. The **decoder** is initialized with this context vector and generates the output sequence one token at a time, each token conditioned on the context and the tokens generated so far. The encoder compresses meaning in; the decoder expands meaning out. This clean separation is what lets input and output lengths differ freely.
+
+## The context vector and the bottleneck
+
+The **context vector** — the encoder's final hidden state — must capture *everything* about the input that the decoder needs. Herein lies the fatal flaw: a single fixed-size vector has to summarize the entire input sequence, no matter how long. For a short sentence this works; for a long one, cramming all the information through one vector loses detail — the **information bottleneck**. Empirically, Seq2Seq translation quality degrades sharply as sentences grow past about 20 words, because the bottleneck cannot hold enough information. This single weakness is the motivation for the entire attention mechanism, the first topic of Phase 2.
+
+<Callout type="warning" title="The bottleneck problem">
+A Seq2Seq model squeezes the whole input into one fixed-size context vector. Like summarizing a paragraph in a single word and asking someone to reconstruct it, this loses information — and the longer the input, the worse the loss. Attention (Topic 11) fixes exactly this by letting the decoder look back at all encoder states.
+</Callout>
+
+## The decoder: autoregressive generation
+
+The decoder generates the output **autoregressively**: it produces one token, feeds that token back as the next input, and repeats, each step conditioned on the context vector and all previously generated tokens. Generation starts with a special start-of-sequence token and continues until the decoder emits an end-of-sequence token (or hits a length limit). Because each token depends on the previous ones, generation is inherently sequential — the same autoregressive pattern you saw in language modeling (Topic 8) and that GPT uses (Topic 20).
+
+## Teacher forcing
+
+Training a decoder on its own predictions is unstable — early mistakes compound, and the model never learns. **Teacher forcing** fixes this: during training, the decoder is fed the *ground-truth* previous token rather than its own (initially wrong) prediction. This stabilizes and speeds training, since each step learns from correct context. The catch is a train/inference mismatch (at inference there is no ground truth, so the decoder must use its own outputs), which can cause errors to accumulate — a phenomenon called exposure bias. Despite this, teacher forcing is the standard training method for sequence decoders.
+
+## Decoding: greedy, beam search, and sampling
+
+At each step the decoder produces a probability distribution over the vocabulary; turning that into an output sequence is the **decoding** decision. **Greedy decoding** picks the single most probable token each step — fast but myopic, since a locally optimal choice can lead to a globally poor sequence. **Beam search** keeps the `k` best partial sequences (the "beam") at each step, expanding all of them and pruning to the top `k`, exploring several hypotheses before committing — it produces higher-quality output for tasks with a correct answer like translation. **Sampling** introduces randomness for diverse, creative output. Beam search was the standard for translation; we revisit all of these for LLM generation in Topic 20.
+
+## The Mathematics
+
+The encoder compresses the input into the context vector `c`, its final hidden state `h_T`:
+
+<MathBlock
+  formula="c = h_T = \text{Encoder}(x_1, x_2, \ldots, x_T)"
+  caption="The context vector is the encoder's final hidden state — a fixed-size summary of the whole input."
+/>
+
+The decoder generates each output token from its own previous state `s_{t-1}`, the previous output `y_{t-1}`, and the context vector `c`:
+
+<MathBlock
+  formula="s_t = f(s_{t-1},\, y_{t-1},\, c), \qquad P(y_t \mid y_{<t}, x) = \text{softmax}(g(s_t))"
+  caption="Decoder recurrence: update the state from the previous output and the (fixed) context, then predict the next token."
+/>
+
+Notice that the *same* context vector `c` feeds every decoder step — the bottleneck made explicit. Beam search, meanwhile, searches for the output sequence maximizing the total log-probability:
+
+<MathBlock
+  formula="\hat{y} = \arg\max_{y} \sum_{t=1}^{T'} \log P(y_t \mid y_{<t}, x)"
+  caption="Beam search approximates the highest-probability output sequence by keeping the top-k partial hypotheses at each step."
+/>
+
+## Applications and the long-sequence problem
+
+Seq2Seq powered **machine translation** (Google Translate's first neural version), **summarization**, **dialogue/chatbots**, and any task mapping one sequence to another. But it **struggles with long sequences** for the reason above: the fixed-size context vector cannot hold the information in a long input, so quality collapses as length grows. The encoder must compress more and more into the same-size vector, and the decoder, conditioned only on that one vector, cannot recover what was lost. This is not a tuning problem but an architectural one — and fixing it requires letting the decoder access *all* encoder states, not just the final summary. That fix is **attention**, and it is exactly where Phase 2 begins.
+
+## Early tricks and the road to attention
+
+Before attention solved the bottleneck properly, researchers found clever partial workarounds that are instructive precisely because they reveal the problem's shape. One famous trick was **reversing the source sentence**: feeding the input backwards so that the first words the encoder reads (and thus the ones freshest in the final hidden state) align with the first words the decoder must produce, shortening the gradient path for those early alignments. It measurably improved translation, which is a telling clue — if simply reordering the input helps, the real problem is clearly about *information having to travel too far* through a single compressed state.
+
+Other workarounds included making the context vector larger (more capacity, but still fixed and still a bottleneck), stacking deeper LSTMs, and feeding the context vector into *every* decoder step rather than just the first. Each helped a little, but none addressed the root cause: a single fixed-size vector simply cannot losslessly represent a variable, potentially large, amount of information. These diminishing returns from patching the bottleneck were exactly the situation that made attention so impactful when it arrived — it did not patch the bottleneck, it *removed* it, by giving the decoder direct access to all of the encoder's per-token states rather than forcing everything through one summary. Seeing the failed and partial fixes makes clear why attention was not just an incremental improvement but a structural breakthrough, and it is a good lesson in engineering: when a series of workarounds all yield diminishing returns, the real progress usually comes from eliminating the underlying constraint rather than mitigating it.
+
+## Seq2Seq as the template for the Transformer
+
+It is fitting to end Phase 1 by noting how much of the Seq2Seq design survives into the architecture that replaced it. The Transformer (Topic 17) is, structurally, a Seq2Seq model: it has an **encoder** that reads the input and a **decoder** that generates the output autoregressively, with the decoder attending to the encoder's representations — exactly the encode-then-decode template you just built. Teacher forcing, autoregressive generation, the start and end tokens, beam search and sampling for decoding — all of these carry over essentially unchanged from the RNN Seq2Seq to the Transformer. The encoder-decoder *idea* is not discarded; it is preserved and supercharged.
+
+What the Transformer changes is the *internals*: it replaces the recurrent encoder and decoder with stacks of attention layers, eliminating both of the RNN's weaknesses at once — the sequential-processing bottleneck (attention processes all positions in parallel) and the long-range and information bottlenecks (attention lets every position directly access every other). So the journey of Phase 1 leads precisely here: you have built the encode-decode framework that organizes sequence-to-sequence problems, and you have hit the specific wall — the fixed context vector — that defines what comes next. Phase 2 keeps the framework and rebuilds its engine around attention. Everything you learned about embeddings, language modeling probabilities, recurrence, and the encoder-decoder structure remains load-bearing; the Transformer is the culmination of these ideas, not a departure from them. With Phase 1 complete, you hold the full classical foundation, and the attention mechanism that opens Phase 2 is the single idea that turns that foundation into modern AI.
+
+## Code Example
+
+The code builds a minimal Seq2Seq model in PyTorch — an LSTM encoder and decoder — and runs a forward pass, showing the encode-then-decode structure and where the context vector lives.
+
+<CodeBlock lang="python" filename="seq2seq.py" code={`# seq2seq.py
+# pip install torch
+import torch
+import torch.nn as nn
+
+class Encoder(nn.Module):
+    def __init__(self, vocab, emb=32, hidden=64):
+        super().__init__()
+        self.emb = nn.Embedding(vocab, emb)
+        self.lstm = nn.LSTM(emb, hidden, batch_first=True)
+    def forward(self, src):
+        # Return ONLY the final hidden/cell states -> the context (bottleneck)
+        _, (h, c) = self.lstm(self.emb(src))
+        return h, c
+
+class Decoder(nn.Module):
+    def __init__(self, vocab, emb=32, hidden=64):
+        super().__init__()
+        self.emb = nn.Embedding(vocab, emb)
+        self.lstm = nn.LSTM(emb, hidden, batch_first=True)
+        self.fc = nn.Linear(hidden, vocab)
+    def forward(self, tgt_token, h, c):
+        out, (h, c) = self.lstm(self.emb(tgt_token), (h, c))
+        return self.fc(out), h, c            # logits over vocab + new states
+
+class Seq2Seq(nn.Module):
+    def __init__(self, vocab):
+        super().__init__()
+        self.encoder = Encoder(vocab)
+        self.decoder = Decoder(vocab)
+    def forward(self, src, tgt):
+        h, c = self.encoder(src)              # encode: input -> context vector
+        outputs = []
+        token = tgt[:, :1]                    # start token
+        for t in range(tgt.size(1)):          # autoregressive decode
+            logits, h, c = self.decoder(token, h, c)
+            outputs.append(logits)
+            token = tgt[:, t:t+1]             # teacher forcing: feed ground truth
+        return torch.cat(outputs, dim=1)
+
+torch.manual_seed(0)
+vocab = 1000
+model = Seq2Seq(vocab)
+src = torch.randint(0, vocab, (2, 9))         # 2 source sentences, length 9
+tgt = torch.randint(0, vocab, (2, 7))         # 2 target sentences, length 7
+logits = model(src, tgt)
+print("source length:", src.size(1), " target length:", tgt.size(1))
+print("output shape:", tuple(logits.shape))   # (2, 7, 1000): per-step vocab dist
+
+# Expected:
+# source length: 9  target length: 7
+# output shape: (2, 7, 1000)
+`} />
+
+The structure makes the bottleneck visible: the encoder returns *only* its final hidden and cell states — the entire 9-token source compressed into one fixed-size context — and the decoder generates all 7 target tokens conditioned solely on that summary (plus teacher-forced previous tokens). Input length 9 and output length 7 differ freely, the variable-length mapping Seq2Seq enables. But every decoder step depends on the same compressed context, and that is precisely the limitation attention removes by letting the decoder look back at *all* encoder states. With that, you have reached the threshold of Phase 2 — and the attention mechanism that reshaped everything.
+
+<KeyTakeaways phase={1}>
+- **Seq2Seq** maps a variable-length input to a variable-length output by **decoupling reading from writing**: an encoder reads, a decoder generates.
+- The **encoder** compresses the input into a fixed-size **context vector** (its final hidden state); the **decoder** generates the output from it autoregressively.
+- The **context-vector bottleneck** is the fatal flaw: one fixed vector cannot hold a long input, so quality collapses past ~20 words — the motivation for attention.
+- **Teacher forcing** trains the decoder on ground-truth previous tokens for stability (with a train/inference mismatch called exposure bias).
+- **Decoding** strategies — greedy (fast, myopic), **beam search** (top-k hypotheses, higher quality), sampling (diverse) — turn per-step distributions into sequences.
+- Seq2Seq powered neural translation and summarization, but its long-sequence weakness is **architectural** — fixed by letting the decoder access all encoder states via **attention** (Phase 2).
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Why does basic Seq2Seq struggle with long input sequences?",
+    options: ["It runs out of memory", "It compresses the entire input into one fixed-size context vector, which cannot hold enough information for long inputs (the bottleneck)", "It cannot be trained", "The decoder is too small"],
+    correctIndex: 1,
+    explanation: "The encoder's single fixed-size context vector must summarize the whole input. For long sequences, too much information is lost through this bottleneck, so translation/summarization quality degrades sharply — an architectural flaw attention fixes."
+  },
+  {
+    question: "What is teacher forcing?",
+    options: ["Forcing the model to use a teacher model", "Feeding the decoder the ground-truth previous token during training (instead of its own prediction) to stabilize and speed learning", "A type of attention", "A decoding strategy"],
+    correctIndex: 1,
+    explanation: "During training, teacher forcing supplies the correct previous token to the decoder so errors don't compound, stabilizing training — at the cost of a train/inference mismatch (exposure bias)."
+  },
+  {
+    question: "How does beam search differ from greedy decoding?",
+    options: ["Beam search is faster", "Beam search keeps the top-k partial hypotheses at each step and explores several before committing, while greedy picks only the single most probable token each step", "They are identical", "Greedy uses attention"],
+    correctIndex: 1,
+    explanation: "Greedy decoding commits to the locally most probable token each step (myopic). Beam search maintains k hypotheses, exploring multiple paths and choosing the highest overall probability — better for tasks with a correct answer like translation."
+  }
+]} />
+
+## What's Next
+
+You have completed Phase 1 — from the NLP pipeline through embeddings, language modeling, and the recurrent and Seq2Seq architectures that defined neural NLP. And you have arrived at its central limitation: the context-vector bottleneck. Phase 2 opens by fixing it. In **Attention Mechanism — Bahdanau & Luong**, the decoder learns to look back at every encoder state, and that one idea — attention — sets in motion the Transformer revolution that powers all of modern AI.

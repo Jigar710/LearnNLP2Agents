@@ -1,0 +1,110 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { PHASES, getTopicsByPhase, getPhase } from '../../data/curriculum';
+import { GLOSSARY } from '../../data/glossary';
+import { withBase } from '../../utils/base';
+
+export function getStaticPaths() {
+  return PHASES.map((p) => ({ params: { phase: String(p.id) } }));
+}
+
+const { phase: phaseId } = Astro.params;
+const phase = getPhase(Number(phaseId))!;
+const topics = getTopicsByPhase(phase.id);
+const slugs = new Set(topics.map((t) => t.slug));
+const terms = GLOSSARY.filter((g) => g.relatedTopics.some((s) => slugs.has(s)))
+  .sort((a, b) => a.term.localeCompare(b.term));
+const num = (n: number) => String(n).padStart(2, '0');
+---
+<BaseLayout title={`Phase ${phase.id} Cheatsheet`} description={`Quick reference for ${phase.title}.`} accent={phase.cssVar} hideFooter>
+  <div class="cheat" style={`--accent: ${phase.color}`}>
+    <header class="cheat-head">
+      <div>
+        <span class="cheat-kicker">Phase {phase.id} Cheatsheet</span>
+        <h1 class="cheat-title">{phase.title}</h1>
+        <p class="cheat-sub">{phase.subtitle}</p>
+      </div>
+      <button id="cheat-print" class="cheat-print" type="button">Print / PDF</button>
+    </header>
+
+    <section class="cheat-block">
+      <h2 class="cheat-h2">Topics in this phase</h2>
+      <ol class="cheat-topics">
+        {topics.map((t) => (
+          <li>
+            <a href={withBase(`/topic/${t.slug}`)}><strong>{num(t.id)}. {t.title}</strong></a>
+            <span class="cheat-topic-sub"> — {t.subtitle}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+
+    <section class="cheat-block">
+      <h2 class="cheat-h2">What you'll master</h2>
+      <ul class="cheat-skills">
+        {phase.skills.map((s) => <li>{s}</li>)}
+      </ul>
+    </section>
+
+    {terms.length > 0 && (
+      <section class="cheat-block">
+        <h2 class="cheat-h2">Key terms</h2>
+        <dl class="cheat-terms">
+          {terms.map((t) => (
+            <div class="cheat-term">
+              <dt>{t.term}</dt>
+              <dd>{t.definition}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+    )}
+
+    <nav class="cheat-nav">
+      {getPhase(phase.id - 1) ? <a href={withBase(`/cheatsheet/${phase.id - 1}`)}>← Phase {phase.id - 1}</a> : <span />}
+      <a href={withBase(`/phase/${phase.id}`)}>Phase {phase.id} overview</a>
+      {getPhase(phase.id + 1) ? <a href={withBase(`/cheatsheet/${phase.id + 1}`)}>Phase {phase.id + 1} →</a> : <span />}
+    </nav>
+  </div>
+</BaseLayout>
+
+<style>
+  .cheat { max-width: 880px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+  .cheat-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; border-bottom: 3px solid var(--accent); padding-bottom: 1rem; margin-bottom: 1.5rem; }
+  .cheat-kicker { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); }
+  .cheat-title { font-family: var(--font-serif); font-weight: 400; font-size: clamp(1.8rem, 5vw, 2.6rem); margin: 0.3rem 0 0.2rem; }
+  .cheat-sub { color: var(--text-secondary); margin: 0; }
+  .cheat-print { flex-shrink: 0; padding: 0.5rem 1rem; border-radius: 9999px; border: 1px solid var(--accent); background: transparent; color: var(--accent); font-weight: 600; font-size: 0.82rem; cursor: pointer; }
+  .cheat-print:hover { background: var(--accent); color: #fff; }
+
+  .cheat-block { margin-bottom: 1.8rem; }
+  .cheat-h2 { font-size: 1.2rem; font-weight: 600; margin: 0 0 0.7rem; color: var(--accent); }
+  .cheat-topics { margin: 0; padding-left: 1.3rem; }
+  .cheat-topics li { margin: 0.3rem 0; line-height: 1.45; }
+  .cheat-topics a { color: var(--text-primary); }
+  .cheat-topic-sub { color: var(--text-muted); font-size: 0.88rem; }
+  .cheat-skills { columns: 2; column-gap: 2rem; padding-left: 1.1rem; margin: 0; }
+  .cheat-skills li { margin: 0.3rem 0; color: var(--text-secondary); line-height: 1.45; }
+  .cheat-terms { margin: 0; }
+  .cheat-term { padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle); break-inside: avoid; }
+  .cheat-term dt { font-weight: 600; color: var(--text-primary); }
+  .cheat-term dd { margin: 0.15rem 0 0; font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5; }
+  .cheat-nav { display: flex; justify-content: space-between; gap: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem; }
+  .cheat-nav a { font-weight: 600; color: var(--accent); }
+
+  @media (max-width: 600px) { .cheat-skills { columns: 1; } }
+</style>
+
+<style is:global>
+  @media print {
+    .navbar, .site-footer, #back-to-top, .cheat-print, .cheat-nav { display: none !important; }
+    .site-main { padding-top: 0 !important; }
+    body { background: #fff !important; color: #000 !important; }
+    .cheat { max-width: 100%; padding: 0; }
+    .cheat-term, .cheat-topics li { break-inside: avoid; }
+  }
+</style>
+
+<script>
+  document.getElementById('cheat-print')?.addEventListener('click', () => window.print());
+</script>

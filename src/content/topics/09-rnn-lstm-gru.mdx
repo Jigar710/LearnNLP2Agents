@@ -1,0 +1,198 @@
+---
+title: "Sequence Models — RNN, LSTM & GRU"
+subtitle: "Processing text sequentially — the era before attention"
+phase: 1
+topicNumber: 9
+slug: "rnn-lstm-gru"
+readingTime: 18
+prerequisites: ["language-modeling-perplexity"]
+hasCode: true
+hasMath: true
+hasInteractiveDemo: false
+---
+import { getTopicBySlug } from '../../data/curriculum';
+import TopicHero from '../../components/topic/TopicHero.astro';
+import Callout from '../../components/topic/Callout.astro';
+import CodeBlock from '../../components/topic/CodeBlock.astro';
+import KeyTakeaways from '../../components/topic/KeyTakeaways.astro';
+import QuizBlock from '../../components/topic/QuizBlock.tsx';
+import MathBlock from '../../components/topic/MathBlock.astro';
+import ComparisonTable from '../../components/topic/ComparisonTable.astro';
+
+export const topic = getTopicBySlug('rnn-lstm-gru');
+
+<TopicHero topic={topic} />
+
+N-gram models are trapped in a fixed, short window. To use the *whole* history of a sequence, we need a model with **memory** — one that processes text word by word while maintaining a running summary of everything seen so far. **Recurrent Neural Networks (RNNs)** do exactly this, and they defined the neural-NLP era just before attention arrived. But plain RNNs struggle to remember across long gaps, a problem that **LSTMs** and **GRUs** solve with clever gating. This topic builds all three, the recurrent architectures that powered translation, speech, and text generation for years — and whose limitations directly motivated the Transformer.
+
+We will see why feedforward networks fail on sequences, how an RNN carries a hidden state through time, the vanishing-gradient problem that cripples plain RNNs, and how LSTM and GRU gates fix it. The math covers the gate equations, and the code builds a character-level RNN from scratch.
+
+## Why feedforward networks fail for sequences
+
+A standard feedforward network takes a fixed-size input and produces a fixed-size output. Language is neither: sentences vary in length, and word order matters. You cannot simply feed a whole sentence into a feedforward net — its size is not fixed, and flattening it loses order. What sequences need is a model that processes tokens *one at a time* while carrying information forward, so that each step's output depends on all previous steps. That is the recurrent idea: the same network applied repeatedly, passing a memory from one step to the next.
+
+## Recurrent Neural Networks
+
+An **RNN** processes a sequence one element at a time, maintaining a **hidden state** that acts as a memory of everything seen so far. At each time step, it takes the current input (a word embedding) and the previous hidden state, combines them to produce a new hidden state, and optionally an output. The same weights are used at every step — the network is "unrolled" through time, applying the identical transformation repeatedly. The hidden state is the RNN's memory: it summarizes the sequence prefix into a fixed-size vector that flows forward, letting the model condition each step on arbitrarily long history (in principle).
+
+## The RNN forward pass
+
+At each step `t`, the new hidden state combines the previous hidden state and the current input through learned weight matrices and a nonlinearity (typically `tanh`):
+
+<MathBlock
+  formula="h_t = \tanh\!\left(W_h\, h_{t-1} + W_x\, x_t + b\right)"
+  caption="RNN recurrence: the new hidden state is a nonlinear function of the previous state and the current input."
+/>
+
+This single equation, applied repeatedly, is the entire RNN. The hidden state `h_t` carries information forward, and because `h_t` depends on `h_{t-1}`, which depends on `h_{t-2}`, and so on, the state in principle reflects the whole prefix.
+
+## RNN limitations: vanishing and exploding gradients
+
+In principle an RNN can remember arbitrarily far back; in practice plain RNNs cannot. The culprit is the **vanishing gradient problem**. Training uses backpropagation through time, multiplying gradients across many time steps. If those gradient factors are less than 1, the product shrinks exponentially with distance — gradients **vanish**, so the model cannot learn dependencies more than a handful of steps apart. If the factors exceed 1, gradients **explode** into instability. Vanishing gradients are the more insidious problem: a plain RNN effectively forgets the distant past, unable to connect "the keys ... are missing" across a long clause. This is the central weakness that gated architectures were invented to fix.
+
+<Callout type="warning" title="The long-range dependency problem">
+Plain RNNs forget. Because gradients vanish across many time steps, a vanilla RNN cannot learn that a word at position 50 depends on one at position 5. Most of the architecture engineering in this topic — LSTM and GRU gates — exists to let information and gradients survive across long gaps.
+</Callout>
+
+## LSTM: the gated fix
+
+The **Long Short-Term Memory (LSTM)** network solves vanishing gradients with a separate **cell state** and three **gates** that control information flow. The **cell state** is a memory highway that runs through the sequence with only minor linear interactions, so information (and gradients) can flow across many steps largely undisturbed. The three gates — each a small neural layer producing values between 0 and 1 — regulate it: the **forget gate** decides what to erase from the cell state, the **input gate** decides what new information to write, and the **output gate** decides what to read out as the hidden state. By learning when to remember, forget, and output, LSTMs maintain information across hundreds of steps, dramatically outperforming plain RNNs on long dependencies.
+
+## The Mathematics: LSTM gates
+
+An LSTM computes three gates (forget `f`, input `i`, output `o`) and a candidate update, then updates the cell state `c` and hidden state `h`. Each gate is a sigmoid layer over the previous hidden state and current input:
+
+<MathBlock
+  formula="f_t = \sigma(W_f [h_{t-1}, x_t] + b_f), \quad i_t = \sigma(W_i [h_{t-1}, x_t] + b_i), \quad o_t = \sigma(W_o [h_{t-1}, x_t] + b_o)"
+  caption="The three LSTM gates: forget, input, and output — each outputs values in [0,1] controlling information flow."
+/>
+
+The cell state is updated by forgetting part of the old state and adding gated new candidate information `\tilde{c}`, then the hidden state is the gated, squashed cell state:
+
+<MathBlock
+  formula="c_t = f_t \odot c_{t-1} + i_t \odot \tilde{c}_t, \qquad h_t = o_t \odot \tanh(c_t)"
+  caption="Cell update: forget old, add new (input-gated candidate); hidden state reads out the cell through the output gate (⊙ is element-wise product)."
+/>
+
+The key to why this beats a plain RNN is the cell-state update: it is *additive* (`c_t = f_t ⊙ c_{t-1} + ...`), so gradients flow back through `c` without the repeated multiplication that causes vanishing — the forget gate near 1 keeps a near-uninterrupted gradient path.
+
+## GRU: the streamlined alternative
+
+The **Gated Recurrent Unit (GRU)** simplifies the LSTM into two gates and no separate cell state. The **reset gate** controls how much past state to forget when computing the candidate, and the **update gate** interpolates between keeping the old hidden state and adopting the new candidate — combining the LSTM's forget and input gates into one. With fewer parameters and gates, GRUs are faster to train and often match LSTM quality, making them a popular lighter-weight choice. The choice between them is empirical: GRU for speed, LSTM when its extra capacity helps.
+
+## Bidirectional and stacked RNNs
+
+Two common enhancements. A **bidirectional RNN (BiLSTM)** runs two RNNs — one left-to-right, one right-to-left — and concatenates their states, so each position sees both past *and* future context (useful for understanding tasks where the whole sentence is available). **Stacked (deep) RNNs** layer multiple recurrent layers, with each layer's output feeding the next, learning hierarchical representations much as deep networks do elsewhere. BiLSTMs were the dominant architecture for tagging, NER, and many tasks right up until BERT.
+
+<ComparisonTable
+  phase={1}
+  headers={["Aspect", "RNN", "LSTM", "GRU"]}
+  rows={[
+    ["Gates", "None", "3 (forget, input, output)", "2 (reset, update)"],
+    ["Memory", "Hidden state only", "Cell state + hidden state", "Hidden state only"],
+    ["Long dependencies", "Poor (vanishing gradients)", "Strong", "Strong"],
+    ["Parameters / speed", "Fewest / fastest", "Most / slowest", "Middle / fast"],
+    ["Use when", "Rarely (baseline)", "Quality on long sequences", "Speed with good quality"],
+  ]}
+  caption="Plain RNN vs the two gated architectures."
+/>
+
+## Training RNNs: backpropagation through time
+
+Training a recurrent network has its own wrinkle worth understanding. Because the same weights are applied at every time step, computing gradients requires unrolling the network through the whole sequence and backpropagating through every step — a procedure called **backpropagation through time (BPTT)**. For long sequences this is expensive and is where the vanishing/exploding gradient problem bites hardest, since the gradient must travel back through every step. In practice, **truncated BPTT** limits how far back gradients flow (say, 35 steps), trading some long-range learning for tractable training, and **gradient clipping** caps the gradient magnitude to prevent the explosions that would otherwise destabilize training.
+
+These training details are not incidental; they shaped what RNNs could and could not do. Truncation imposes a practical horizon on memory even for LSTMs, and the sequential nature of BPTT means training cannot be parallelized across time steps within a sequence — you must process step 1 before step 2. This sequential bottleneck is a fundamental efficiency limitation: on modern hardware built for massive parallelism, an RNN's inability to process all positions at once leaves enormous compute on the table. It is one of the two decisive reasons the Transformer displaced RNNs (the other being long-range dependencies), because the Transformer processes a whole sequence in parallel. Appreciating the BPTT bottleneck makes the Transformer's parallelism, which can look like a mere implementation detail, register as the profound advantage it actually is.
+
+## RNNs as language models and their legacy
+
+RNNs are not just classifiers; they were the dominant *language models* of the neural era before Transformers. An RNN language model predicts the next word from its hidden state, which summarizes the entire prefix — a strict improvement over n-grams' fixed window, since the hidden state can in principle encode unbounded history. RNN and LSTM language models powered the first wave of fluent neural text generation, and the encoder-decoder RNN (next topic) drove a generation of machine translation systems. For several years, "neural NLP" largely meant "LSTM."
+
+Their legacy persists even as Transformers have superseded them. The encoder-decoder structure that RNNs popularized carries directly into the Transformer (Phase 2). The idea of a learned, fixed-size state summarizing a sequence reappears throughout deep learning. And the *specific failures* of RNNs — sequential processing and difficulty with long dependencies — are precisely what attention was designed to fix, so understanding RNNs is the clearest way to understand *why* the Transformer is shaped as it is. There has even been renewed interest in modern recurrent architectures (state-space models and their kin) that aim to recover the RNN's efficient, linear-in-length processing while matching Transformer quality on long sequences, so the recurrent idea is not entirely a closed chapter. But for the curriculum's purposes, RNNs are the crucial bridge: they took language modeling from fixed windows to learned memory, ran into the walls of sequential computation and vanishing gradients, and in doing so defined the problems that the attention mechanism of the next phase was invented to solve.
+
+## Code Example
+
+The code implements a minimal character-level RNN forward pass from scratch in NumPy (showing the recurrence directly), then a practical PyTorch LSTM for sequence classification.
+
+<CodeBlock lang="python" filename="rnn_lstm.py" code={`# rnn_lstm.py
+# pip install numpy torch
+import numpy as np
+
+# --- A character-level RNN forward pass from scratch (NumPy) ---
+np.random.seed(0)
+hidden_size, vocab = 8, 5
+Wx = np.random.randn(hidden_size, vocab) * 0.1     # input -> hidden
+Wh = np.random.randn(hidden_size, hidden_size) * 0.1  # hidden -> hidden
+b  = np.zeros((hidden_size, 1))
+
+def rnn_step(x, h_prev):
+    return np.tanh(Wx @ x + Wh @ h_prev + b)        # the RNN recurrence
+
+# Process a sequence of 4 one-hot characters
+sequence = [np.eye(vocab)[i].reshape(-1, 1) for i in [2, 0, 3, 1]]
+h = np.zeros((hidden_size, 1))
+for t, x in enumerate(sequence):
+    h = rnn_step(x, h)                               # carry hidden state forward
+    print(f"step {t}: hidden state norm = {np.linalg.norm(h):.3f}")
+
+# --- A practical LSTM for sequence classification (PyTorch) ---
+import torch, torch.nn as nn
+
+class LSTMClassifier(nn.Module):
+    def __init__(self, vocab, emb=32, hidden=64, classes=2):
+        super().__init__()
+        self.emb = nn.Embedding(vocab, emb)
+        self.lstm = nn.LSTM(emb, hidden, batch_first=True, bidirectional=True)
+        self.fc = nn.Linear(hidden * 2, classes)     # *2 for bidirectional
+    def forward(self, x):
+        e = self.emb(x)
+        out, (h, c) = self.lstm(e)                    # h: final hidden states
+        final = torch.cat([h[0], h[1]], dim=1)        # concat both directions
+        return self.fc(final)
+
+model = LSTMClassifier(vocab=1000)
+batch = torch.randint(0, 1000, (2, 10))              # 2 sequences of length 10
+logits = model(batch)
+print("\\nLSTM output shape:", tuple(logits.shape))   # (2, 2): 2 examples, 2 classes
+
+# Expected:
+# step 0..3: hidden state norms (growing as the state accumulates)
+# LSTM output shape: (2, 2)
+`} />
+
+The NumPy section shows the RNN's essence — a hidden state carried forward, updated by the same `tanh(Wx·x + Wh·h)` recurrence at every step. The PyTorch section is a realistic bidirectional LSTM classifier: embed tokens, run the LSTM, concatenate the final forward and backward hidden states, and classify. This BiLSTM pattern was the standard for text classification and tagging for years. But notice the fundamental constraint: an RNN must process tokens *sequentially*, one after another, which is slow and still struggles with very long dependencies — the two weaknesses that attention and the Transformer (Phase 2) were built to eliminate.
+
+<KeyTakeaways phase={1}>
+- **RNNs** process sequences one element at a time, carrying a **hidden state** as memory so each step depends on all previous ones — overcoming the fixed window of n-grams.
+- Plain RNNs suffer **vanishing/exploding gradients**: gradients shrink (or blow up) across many time steps, so they cannot learn **long-range dependencies**.
+- **LSTMs** add a **cell state** and three gates (**forget, input, output**); the additive cell update preserves gradients, enabling memory across hundreds of steps.
+- **GRUs** streamline this to two gates (**reset, update**) and no separate cell state — fewer parameters, faster, often matching LSTM quality.
+- **Bidirectional** RNNs read both directions; **stacked** RNNs add depth — BiLSTMs dominated tagging/NER until BERT.
+- RNNs are **inherently sequential** (slow) and still strain on long dependencies — the exact weaknesses the Transformer eliminates.
+</KeyTakeaways>
+
+## Check Your Understanding
+
+<QuizBlock client:visible questions={[
+  {
+    question: "Which gate in an LSTM controls what to erase from the cell state?",
+    options: ["The input gate", "The forget gate", "The output gate", "The reset gate"],
+    correctIndex: 1,
+    explanation: "The forget gate (a sigmoid producing values in [0,1]) decides how much of the previous cell state to keep or erase. The input gate writes new information, and the output gate controls what is read out."
+  },
+  {
+    question: "Why do plain RNNs struggle with long-range dependencies?",
+    options: ["They have too many parameters", "Vanishing gradients — backpropagating through many time steps multiplies many small factors, shrinking gradients exponentially so distant dependencies cannot be learned", "They process tokens in parallel", "They have no hidden state"],
+    correctIndex: 1,
+    explanation: "Backpropagation through time multiplies gradient factors across steps. If those factors are below 1, the product vanishes with distance, so a plain RNN effectively forgets information from far back."
+  },
+  {
+    question: "How does an LSTM's cell state help preserve gradients over long sequences?",
+    options: ["It multiplies the state each step", "Its update is additive (forget-gated old state plus new info), so gradients flow back without the repeated multiplication that causes vanishing", "It removes the hidden state", "It uses no gates"],
+    correctIndex: 1,
+    explanation: "The cell state updates additively (c_t = f_t ⊙ c_{t-1} + i_t ⊙ c̃_t). With the forget gate near 1, this creates a near-uninterrupted gradient highway, avoiding the exponential shrinkage of plain RNNs."
+  }
+]} />
+
+## What's Next
+
+RNNs can encode a sequence, but to *transform* one sequence into another — translate a sentence, summarize a document — we need an architecture that reads an input sequence and generates a different output sequence. In **Seq2Seq Architecture**, we study the encoder-decoder design that powered translation and set the stage for attention.

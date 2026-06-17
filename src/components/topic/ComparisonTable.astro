@@ -1,0 +1,95 @@
+---
+/**
+ * ComparisonTable (PRD §11.6 / Step 6.7) — styled, responsive comparison table.
+ * Dark header row, alternating row backgrounds, phase-colored first-column
+ * accent, horizontal scroll on mobile.
+ */
+interface Props {
+  headers: string[];
+  rows: string[][];
+  phase?: number;
+  caption?: string;
+}
+const { headers, rows, phase = 1, caption } = Astro.props;
+---
+
+<div class="cmp-wrap" style={`--accent: var(--phase-${phase})`}>
+  <table class="cmp-table">
+    {caption ? <caption>{caption}</caption> : null}
+    <thead>
+      <tr>
+        {headers.map((h) => <th scope="col" set:html={h} />)}
+      </tr>
+    </thead>
+    <tbody>
+      {
+        rows.map((row) => (
+          <tr>
+            {row.map((cell, ci) =>
+              ci === 0 ? <th scope="row" set:html={cell} /> : <td set:html={cell} />
+            )}
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+</div>
+
+<style>
+  .cmp-wrap {
+    margin: 1.5rem 0;
+    overflow-x: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+  }
+  .cmp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    min-width: 480px;
+  }
+  .cmp-table caption {
+    caption-side: bottom;
+    padding: 0.6rem 1rem;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    text-align: left;
+  }
+  .cmp-table th,
+  .cmp-table td {
+    padding: 0.6rem 0.9rem;
+    text-align: left;
+    vertical-align: top;
+    line-height: 1.5;
+  }
+  .cmp-table thead th {
+    background: #1e1e2e;
+    color: #f9fafb;
+    font-weight: 600;
+    font-size: 0.82rem;
+    white-space: nowrap;
+  }
+  .cmp-table thead th:first-child {
+    border-top-left-radius: 9px;
+  }
+  .cmp-table thead th:last-child {
+    border-top-right-radius: 9px;
+  }
+  .cmp-table tbody tr {
+    border-top: 1px solid var(--border-subtle);
+  }
+  .cmp-table tbody tr:nth-child(even) {
+    background: color-mix(in srgb, var(--text-muted) 6%, transparent);
+  }
+  .cmp-table tbody th[scope='row'] {
+    font-weight: 600;
+    color: var(--text-primary);
+    border-left: 3px solid var(--accent);
+  }
+  .cmp-table td {
+    color: var(--text-secondary);
+  }
+  .cmp-table :global(code) {
+    font-size: 0.8em;
+  }
+</style>
