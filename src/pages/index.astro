@@ -19,7 +19,8 @@ const curriculumHref = withBase('/curriculum');
   <!-- HERO -->
   <section class="hero">
     <h1 class="hero-title">NLP to Agentic AI — <span class="hero-grad">Beginner to Advanced</span></h1>
-    <p class="hero-tag">Everything you need to go from raw text to production AI agents — NLP fundamentals, Transformers, LLMs, RAG, and Agentic AI explained step by step, with working code and interactive diagrams.</p>
+    <p class="hero-tag">From a single token to a thinking agent — learn, revise, and master the entire journey of modern AI: NLP, Transformers, LLMs, RAG, and Agentic AI, all in one place.</p>
+    <p class="hero-philo">“To teach a machine our language is to teach it to understand us.”</p>
     <div class="hero-cta">
       <a class="btn btn-primary" href={startHref}>Start Learning →</a>
       <a class="btn btn-ghost" href={curriculumHref}>View Curriculum</a>
@@ -75,7 +76,8 @@ const curriculumHref = withBase('/curriculum');
     background: linear-gradient(90deg, var(--phase-1), var(--phase-2) 40%, var(--phase-5));
     -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent;
   }
-  .hero-tag { font-size: 1.1rem; line-height: 1.6; color: var(--text-secondary); max-width: 62ch; margin: 0 auto 1.8rem; }
+  .hero-tag { font-size: 1.1rem; line-height: 1.6; color: var(--text-secondary); max-width: 62ch; margin: 0 auto 1.1rem; }
+  .hero-philo { font-size: 1.02rem; font-style: italic; line-height: 1.5; color: var(--accent, var(--phase-1)); max-width: 52ch; margin: 0 auto 1.9rem; opacity: 0.92; }
   .hero-cta { display: flex; flex-wrap: wrap; gap: 0.7rem; justify-content: center; margin-bottom: 1.8rem; }
   .btn { display: inline-flex; align-items: center; padding: 0.6rem 1.3rem; border-radius: 9999px; font-weight: 600; font-size: 0.92rem; }
   .btn-primary { background: var(--accent); color: #fff; }
