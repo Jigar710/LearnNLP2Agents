@@ -18,15 +18,9 @@ A free, open-source curriculum that takes you from **NLP fundamentals** all the 
 
 ---
 
-## ✨ Features
+<img width="3420" height="2070" alt="image" src="https://github.com/user-attachments/assets/00c79480-3c54-4351-bb7d-cb2bf912a33f" />
 
-- 📚 **48 topics**, ~2,500+ words each, with runnable Python examples
-- 🎨 **8 interactive diagrams** — NLP pipeline, embeddings, attention, the Transformer, BERT masking, token generation, RAG pipeline, ReAct agent loop
-- 🔍 **Offline full-text search** (`⌘K` / `Ctrl+K`) powered by Pagefind — no server, no API
-- 🌗 **Dark / light mode** with a phase-color design system (no flash of unstyled content)
-- ∑ **Math rendered with KaTeX** at build time; code highlighted with Shiki
-- 📊 **Local progress tracking**, per-phase cheatsheets, and a 100+ term glossary
-- ⚡ **Static-first** — ships HTML + minimal React islands; fast everywhere
+<img width="3420" height="2070" alt="image" src="https://github.com/user-attachments/assets/e914a6c4-5eab-406e-b110-a58fe41ec401" />
 
 ## 🗺️ The five phases
 
@@ -38,26 +32,6 @@ A free, open-source curriculum that takes you from **NLP fundamentals** all the 
 | 4 | **Applied LLM Engineering** | prompting, advanced prompting, RAG, chunking & embeddings, vector databases, advanced RAG, evaluation, inference optimization |
 | 5 | **Agents & Agentic AI** | agent architectures, ReAct, tool use, LangChain, LangGraph, memory, multi-agent systems, planning, evaluation, production |
 
-## 🚀 Quick start
-
-```bash
-npm install      # install dependencies (Node >= 22.12)
-npm run dev      # dev server → http://localhost:4321/LearnNLP2Agents
-```
-
-### All scripts
-
-| Script | What it does |
-|--------|--------------|
-| `npm run dev` | Start the Astro dev server |
-| `npm run build` | Build the static site to `dist/` (auto-runs Pagefind via `postbuild`) |
-| `npm run preview` | Preview the production build locally |
-| `npm run search:build` | (Re)build the Pagefind search index manually |
-
-> **Search note:** the search index is generated from the built site, so it only
-> works against a production build. Use `npm run build && npm run preview` to try
-> search locally — it gracefully shows "unavailable" in `npm run dev`.
-
 ## 🧰 Tech stack
 
 - **[Astro](https://astro.build)** — static site generator + MDX content collections
@@ -67,35 +41,6 @@ npm run dev      # dev server → http://localhost:4321/LearnNLP2Agents
 - **[Shiki](https://shiki.style)** — syntax highlighting
 - **[Pagefind](https://pagefind.app)** — offline, static full-text search
 - **[D3](https://d3js.org)** — data-visualization diagrams
-
-## 📁 Project structure
-
-```
-src/
-├── components/
-│   ├── diagrams/   # interactive D3 / React diagrams
-│   ├── home/       # homepage sections (phase cards, etc.)
-│   ├── layout/     # Navbar, Footer, Logo
-│   ├── topic/      # topic hero + page chrome
-│   └── ui/         # search modal, scroll progress, theme toggle
-├── content/topics/ # 48 MDX topic files (the curriculum)
-├── data/           # phases, glossary, and metadata
-├── layouts/        # BaseLayout + TopicLayout
-├── pages/          # routes: index, curriculum, glossary, phase/, topic/, cheatsheet/
-├── scripts/        # client-side helpers
-├── styles/         # global + diagram CSS
-└── utils/          # base-path + shared helpers
-```
-
-## 🌐 Deployment (GitHub Pages)
-
-Deploys automatically via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
-
-1. Push this project to the `main` branch of your repo.
-2. **Settings → Pages → Source: GitHub Actions.**
-3. Confirm `site` + `base` in [`astro.config.mjs`](astro.config.mjs) match your repo
-   (currently `https://jigar710.github.io` + `/LearnNLP2Agents`).
-4. Every push to `main` builds the site, generates the Pagefind index, and deploys.
 
 ## 📄 License
 
